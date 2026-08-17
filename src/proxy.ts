@@ -12,9 +12,7 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico, images, etc.
-     * - api/cron (scheduled route -- authenticates itself via CRON_SECRET,
-     *   not a Supabase session, since no admin is logged in when it runs)
      */
-    "/((?!_next/static|_next/image|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -22,6 +22,7 @@ The schema, security policies, and the 15 tracked companies live in
 4. `20260101000004_rls.sql`
 5. `20260101000005_seed_companies.sql`
 6. `20260101000006_news_automation.sql` (News Sources / News Inbox / Gemini pipeline -- purely additive, does not touch the tables above)
+7. `20260101000007_supabase_cron_dispatch.sql` (schedules the 2-hour source check -- see section 7 below; requires a one-time Vault secret first, do not run this one until you've read that section)
 
 **Easiest way:** open the Supabase dashboard → **SQL Editor**, paste each
 file's contents in order, and click *Run*.
@@ -118,47 +119,72 @@ This adds: News Sources, News Inbox, and Gemini-assisted preparation. Skip
 this section if you only want manual news entry -- everything above works
 without it.
 
+The 2-hour scheduled check runs entirely inside **Supabase** (`pg_cron` +
+`pg_net` calling a Supabase Edge Function) -- not Vercel. Vercel's Hobby
+plan can't run Cron more than once a day, so nothing about scheduling
+depends on Vercel at all; Vercel only hosts the web app.
+
 1. **Get a Gemini API key.** Go to https://aistudio.google.com/apikey,
    create a key on the Free Tier. Do not paste it into any chat -- only
-   into environment variables (step 3 below and Vercel's dashboard).
-2. **Get your Supabase service role key.** Supabase dashboard -> Project
-   Settings -> API -> reveal the `service_role` key. This key bypasses all
-   Row Level Security, so it is only ever used by the scheduled fetch route
-   running with no logged-in user -- never put it in `NEXT_PUBLIC_*`, never
-   commit it, never use it anywhere else in the app.
-3. **Set the new environment variables** (locally in `.env.local`, and in
-   Vercel's Project Settings -> Environment Variables for production):
+   into environment variables (step 4 below and Vercel's dashboard).
+2. **Deploy the Edge Function.** The function code lives in
+   `supabase/functions/fetch-sources` (with shared logic in
+   `supabase/functions/_shared/automation`). With the
+   [Supabase CLI](https://supabase.com/docs/guides/cli) installed and
+   linked to your project (`supabase link --project-ref YOUR-PROJECT-REF`):
+   ```bash
+   supabase functions deploy fetch-sources
    ```
-   SUPABASE_SERVICE_ROLE_KEY=<from step 2>
-   CRON_SECRET=<any long random string you generate yourself>
+   No function-specific secrets need setting for this step -- Supabase
+   automatically provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+   inside every Edge Function's environment. (No CLI? You can also
+   create/paste this function's code directly in the Supabase Dashboard
+   under **Edge Functions**.)
+3. **Store the cron job's invocation secret in Vault.** This is a one-time
+   step you run yourself, directly in the Supabase SQL Editor -- never
+   paste this into chat or commit it to a file. In the SQL Editor, run:
+   ```sql
+   select vault.create_secret(
+     '<paste your project''s service_role key here>',
+     'edge_function_invoke_key',
+     'Bearer token pg_cron uses to call the fetch-sources Edge Function'
+   );
+   ```
+   (Find the `service_role` key at Project Settings -> API. Vault encrypts
+   it at rest; only Postgres itself can decrypt it, and only the cron job's
+   own SQL reads it back out.)
+4. **Set the environment variables** (locally in `.env.local`, and in
+   Vercel's Project Settings -> Environment Variables for production --
+   these two are Gemini-only now, nothing scheduling-related belongs in
+   Vercel):
+   ```
    GEMINI_API_KEY=<from step 1>
    GEMINI_MODEL=gemini-2.5-flash
    ```
-4. **The 2-hour schedule is defined in `vercel.json`** (`crons`) and points
-   at `/api/cron/fetch-sources`. Vercel reads this automatically on deploy
-   -- no dashboard configuration needed, other than the environment
-   variables above (Vercel automatically sends `CRON_SECRET` as the
-   request's Bearer token for its own cron invocations).
-   - **Vercel plan note:** frequent (every-2-hours) Cron schedules require
-     a Vercel Pro plan or higher. On the Hobby plan, Vercel limits Cron
-     Jobs to once per day, so this schedule will be reduced automatically
-     by Vercel to run once daily. If you're on Hobby and want the full
-     2-hour cadence, use a free external scheduler (e.g. cron-job.org or a
-     GitHub Actions scheduled workflow) to call
-     `https://YOUR-DOMAIN/api/cron/fetch-sources` every 2 hours with header
-     `Authorization: Bearer <your CRON_SECRET>`. Either way, "Fetch Now" /
-     "Fetch All Active Sources" in the Admin UI always work immediately,
-     regardless of plan.
-5. **Add your news sources.** Log in as Admin -> News Sources -> Add
+5. **Run migration 7** (`20260101000007_supabase_cron_dispatch.sql`) in the
+   SQL Editor -- but first open the file and replace
+   `https://YOUR-PROJECT-REF.supabase.co` with your actual project URL.
+   This enables `pg_cron`/`pg_net` and schedules the job
+   `fetch-news-sources-every-2-hours`, which calls the Edge Function every
+   2 hours using the Vault secret from step 3 as its bearer token. Re-run
+   this migration any time (it replaces the existing schedule rather than
+   duplicating it) if you need to change the URL or timing.
+6. **Add your news sources.** Log in as Admin -> News Sources -> Add
    Source. Use "Fetch Now" on a source right after adding it to confirm it
-   works before waiting for the schedule.
+   works before waiting for the schedule -- "Fetch Now" and "Fetch All
+   Active Sources" always run instantly from the Admin UI regardless of the
+   2-hour schedule.
+7. **Check it's actually running** (optional, after ~2 hours): Supabase
+   Dashboard -> Database -> Cron shows recent job runs; Edge Functions ->
+   fetch-sources -> Logs shows each invocation; and the Admin ->
+   Automation page in the app shows the resulting fetch summaries either
+   way.
 
 ## 8. Moving off Vercel later
 
-This app only uses standard Next.js/Node.js features — no Vercel-specific
-storage or functions. The one Vercel-specific piece is the `crons` entry in
-`vercel.json` (the 2-hour schedule); everything else works unchanged. To
-self-host:
+This app only uses standard Next.js/Node.js features -- no Vercel-specific
+storage or functions, and the 2-hour schedule already lives in Supabase, not
+Vercel, so there is nothing Vercel-specific left to replace. To self-host:
 
 ```bash
 npm install
@@ -168,10 +194,7 @@ npm run start   # serves on PORT (default 3000)
 
 Point it at the same Supabase project (or a self-hosted Postgres +
 Supabase-compatible auth layer later) using the same environment variables,
-behind your own reverse proxy/HTTPS termination. Replace `vercel.json`'s
-cron with any scheduler (cron, systemd timer, GitHub Actions) that calls
-`GET /api/cron/fetch-sources` every 2 hours with header
-`Authorization: Bearer <CRON_SECRET>`.
+behind your own reverse proxy/HTTPS termination.
 
 ## Adding real company data
 
