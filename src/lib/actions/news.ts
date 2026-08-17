@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { newsSchema, parseTagsInput } from "@/lib/validation/news";
+import { syncTags } from "@/lib/utils/tags";
 
 export interface NewsFormState {
   error?: string;
@@ -20,29 +21,6 @@ function readNewsForm(formData: FormData) {
     published: formData.get("published") === "on",
     tags: parseTagsInput(String(formData.get("tags") ?? "")),
   });
-}
-
-async function syncTags(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  newsId: string,
-  tagNames: string[]
-) {
-  await supabase.from("news_tags").delete().eq("news_id", newsId);
-  if (tagNames.length === 0) return;
-
-  const { data: tagRows, error } = await supabase
-    .from("tags")
-    .upsert(
-      tagNames.map((name) => ({ name })),
-      { onConflict: "name", ignoreDuplicates: false }
-    )
-    .select("id,name");
-
-  if (error || !tagRows) return;
-
-  await supabase
-    .from("news_tags")
-    .insert(tagRows.map((t) => ({ news_id: newsId, tag_id: t.id })));
 }
 
 export async function createNewsAction(

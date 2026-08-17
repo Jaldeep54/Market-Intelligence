@@ -21,6 +21,7 @@ The schema, security policies, and the 15 tracked companies live in
 3. `20260101000003_indexes.sql`
 4. `20260101000004_rls.sql`
 5. `20260101000005_seed_companies.sql`
+6. `20260101000006_news_automation.sql` (News Sources / News Inbox / Gemini pipeline -- purely additive, does not touch the tables above)
 
 **Easiest way:** open the Supabase dashboard → **SQL Editor**, paste each
 file's contents in order, and click *Run*.
@@ -111,10 +112,53 @@ either account you created above.
    Vercel project settings.
 4. Deploy. Vercel auto-detects Next.js — no extra configuration is required.
 
-## 7. Moving off Vercel later
+## 7. Set up automated news collection (optional)
+
+This adds: News Sources, News Inbox, and Gemini-assisted preparation. Skip
+this section if you only want manual news entry -- everything above works
+without it.
+
+1. **Get a Gemini API key.** Go to https://aistudio.google.com/apikey,
+   create a key on the Free Tier. Do not paste it into any chat -- only
+   into environment variables (step 3 below and Vercel's dashboard).
+2. **Get your Supabase service role key.** Supabase dashboard -> Project
+   Settings -> API -> reveal the `service_role` key. This key bypasses all
+   Row Level Security, so it is only ever used by the scheduled fetch route
+   running with no logged-in user -- never put it in `NEXT_PUBLIC_*`, never
+   commit it, never use it anywhere else in the app.
+3. **Set the new environment variables** (locally in `.env.local`, and in
+   Vercel's Project Settings -> Environment Variables for production):
+   ```
+   SUPABASE_SERVICE_ROLE_KEY=<from step 2>
+   CRON_SECRET=<any long random string you generate yourself>
+   GEMINI_API_KEY=<from step 1>
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+4. **The 2-hour schedule is defined in `vercel.json`** (`crons`) and points
+   at `/api/cron/fetch-sources`. Vercel reads this automatically on deploy
+   -- no dashboard configuration needed, other than the environment
+   variables above (Vercel automatically sends `CRON_SECRET` as the
+   request's Bearer token for its own cron invocations).
+   - **Vercel plan note:** frequent (every-2-hours) Cron schedules require
+     a Vercel Pro plan or higher. On the Hobby plan, Vercel limits Cron
+     Jobs to once per day, so this schedule will be reduced automatically
+     by Vercel to run once daily. If you're on Hobby and want the full
+     2-hour cadence, use a free external scheduler (e.g. cron-job.org or a
+     GitHub Actions scheduled workflow) to call
+     `https://YOUR-DOMAIN/api/cron/fetch-sources` every 2 hours with header
+     `Authorization: Bearer <your CRON_SECRET>`. Either way, "Fetch Now" /
+     "Fetch All Active Sources" in the Admin UI always work immediately,
+     regardless of plan.
+5. **Add your news sources.** Log in as Admin -> News Sources -> Add
+   Source. Use "Fetch Now" on a source right after adding it to confirm it
+   works before waiting for the schedule.
+
+## 8. Moving off Vercel later
 
 This app only uses standard Next.js/Node.js features — no Vercel-specific
-storage, functions, or config. To self-host:
+storage or functions. The one Vercel-specific piece is the `crons` entry in
+`vercel.json` (the 2-hour schedule); everything else works unchanged. To
+self-host:
 
 ```bash
 npm install
@@ -123,8 +167,11 @@ npm run start   # serves on PORT (default 3000)
 ```
 
 Point it at the same Supabase project (or a self-hosted Postgres +
-Supabase-compatible auth layer later) using the same two environment
-variables, behind your own reverse proxy/HTTPS termination.
+Supabase-compatible auth layer later) using the same environment variables,
+behind your own reverse proxy/HTTPS termination. Replace `vercel.json`'s
+cron with any scheduler (cron, systemd timer, GitHub Actions) that calls
+`GET /api/cron/fetch-sources` every 2 hours with header
+`Authorization: Bearer <CRON_SECRET>`.
 
 ## Adding real company data
 
