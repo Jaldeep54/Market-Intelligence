@@ -5,33 +5,64 @@ import type {
   RelevanceLabel,
 } from "@/lib/types/database";
 
+// "possible_duplicate" is resolved via a separate query (see
+// loadPossibleDuplicates below), not embedded here. news_candidates has a
+// self-referencing FK (possible_duplicate_of -> news_candidates.id), and
+// PostgREST's schema-cache relationship discovery does not reliably surface
+// a table's FK to itself for the `!hint` embed syntax -- confirmed via
+// production logs (PGRST200 "Could not find a relationship between
+// 'news_candidates' and 'news_candidates'") even with the constraint
+// present under the expected name and a fresh schema-cache reload. Every
+// other embed below is a normal FK to a *different* table and is unaffected.
 const CANDIDATE_SELECT = `
   *,
   article:scraped_articles(*),
   source:news_sources(id, source_name, priority),
   suggested_company:companies!news_candidates_suggested_company_id_fkey(id,name),
-  prepared_company:companies!news_candidates_prepared_company_id_fkey(id,name),
-  possible_duplicate:news_candidates!news_candidates_possible_duplicate_of_fkey(
-    id, prepared_title, article:scraped_articles(original_title)
-  )
+  prepared_company:companies!news_candidates_prepared_company_id_fkey(id,name)
 `;
+
+type PossibleDuplicate = NonNullable<NewsCandidateWithArticle["possible_duplicate"]>;
 
 interface RawCandidateRow {
   [key: string]: unknown;
+  possible_duplicate_of: string | null;
   article: NewsCandidateWithArticle["article"];
   source: { id: string; source_name: string; priority: string } | null;
   suggested_company: { id: string; name: string } | null;
   prepared_company: { id: string; name: string } | null;
-  possible_duplicate: NewsCandidateWithArticle["possible_duplicate"];
 }
 
-function mapRow(row: RawCandidateRow): NewsCandidateWithArticle {
+// Fetches possible-duplicate summaries (id, prepared_title, article title)
+// for the given candidate ids in one batched query -- never one query per
+// row, and skipped entirely when there's nothing to look up.
+async function loadPossibleDuplicates(
+  supabase: SupabaseClient,
+  ids: string[]
+): Promise<Map<string, PossibleDuplicate>> {
+  const map = new Map<string, PossibleDuplicate>();
+  if (ids.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("news_candidates")
+    .select("id, prepared_title, article:scraped_articles(original_title)")
+    .in("id", ids);
+
+  if (error || !data) return map;
+
+  for (const row of data as unknown as PossibleDuplicate[]) {
+    map.set(row.id, row);
+  }
+  return map;
+}
+
+function mapRow(row: RawCandidateRow, duplicates: Map<string, PossibleDuplicate>): NewsCandidateWithArticle {
   return {
     ...(row as unknown as NewsCandidateWithArticle),
     source_name: row.source?.source_name ?? row.article?.source_name ?? null,
     suggested_company: row.suggested_company ?? null,
     prepared_company: row.prepared_company ?? null,
-    possible_duplicate: row.possible_duplicate ?? null,
+    possible_duplicate: row.possible_duplicate_of ? duplicates.get(row.possible_duplicate_of) ?? null : null,
   };
 }
 
@@ -59,7 +90,14 @@ export async function getInboxCandidates(
 
   const { data, error } = await query;
   if (error) throw error;
-  return ((data ?? []) as unknown as RawCandidateRow[]).map(mapRow);
+
+  const rows = (data ?? []) as unknown as RawCandidateRow[];
+  const duplicateIds = Array.from(
+    new Set(rows.map((r) => r.possible_duplicate_of).filter((id): id is string => Boolean(id)))
+  );
+  const duplicates = await loadPossibleDuplicates(supabase, duplicateIds);
+
+  return rows.map((row) => mapRow(row, duplicates));
 }
 
 export async function getCandidateById(
@@ -68,7 +106,14 @@ export async function getCandidateById(
 ): Promise<NewsCandidateWithArticle | null> {
   const { data, error } = await supabase.from("news_candidates").select(CANDIDATE_SELECT).eq("id", id).single();
   if (error || !data) return null;
-  return mapRow(data as unknown as RawCandidateRow);
+
+  const row = data as unknown as RawCandidateRow;
+  const duplicates = await loadPossibleDuplicates(
+    supabase,
+    row.possible_duplicate_of ? [row.possible_duplicate_of] : []
+  );
+
+  return mapRow(row, duplicates);
 }
 
 export interface InboxCounts {
