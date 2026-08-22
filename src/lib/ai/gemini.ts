@@ -8,9 +8,13 @@ import { NEWS_CATEGORIES, type NewsCategory } from "@/lib/types/database";
 // prepareNewsWithGemini() below. Swapping providers or SDK versions later
 // only touches this file.
 //
-// Compatible with the Gemini Free Tier; the exact model is never hard-coded
-// beyond this default fallback -- set GEMINI_MODEL to override.
-const DEFAULT_MODEL = "gemini-2.5-flash";
+// The exact model is never hard-coded beyond this default fallback -- set
+// GEMINI_MODEL to override. Google retires/renames model ids over time
+// (gemini-2.5-flash was retired for new API keys in favor of
+// gemini-3.6-flash, confirmed via a live 404 from the Gemini API), so this
+// default may need updating again later; GEMINI_MODEL always takes
+// precedence over it when set.
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 export type GeminiErrorKind =
   | "missing_key"
@@ -107,20 +111,47 @@ Return a JSON object with exactly these fields:
 Return only the JSON object.`;
 }
 
+// Shape of the errors the @google/genai SDK actually throws (an ApiError
+// with a numeric HTTP `status`), as confirmed from a live production
+// failure. Matching on `status` is far more reliable than matching
+// substrings of `message`, which varies in exact wording/casing/punctuation
+// (e.g. Google's own "NOT_FOUND" vs. a naive "not found" string check).
+interface GeminiSdkErrorLike {
+  name?: unknown;
+  message?: unknown;
+  status?: unknown;
+  statusText?: unknown;
+  cause?: unknown;
+}
+
 function classifyError(err: unknown, model: string): GeminiPrepareFailure {
   if (err instanceof Error && err.name === "AbortError") {
     return { ok: false, errorKind: "timeout", message: "Gemini took too long to respond. Please try again.", model };
   }
 
+  const errObj = err as GeminiSdkErrorLike;
+  const status = typeof errObj?.status === "number" ? errObj.status : undefined;
   const message = err instanceof Error ? err.message : String(err);
   const lower = message.toLowerCase();
 
   if (
+    status === 404 ||
+    (lower.includes("model") && (lower.includes("not found") || lower.includes("not_found") || lower.includes("no longer available")))
+  ) {
+    return {
+      ok: false,
+      errorKind: "model_unavailable",
+      message: `The configured Gemini model ("${model}") is unavailable. Ask the project owner to update GEMINI_MODEL.`,
+      model,
+    };
+  }
+
+  if (
+    status === 401 ||
+    status === 403 ||
     lower.includes("api key not valid") ||
     lower.includes("api_key_invalid") ||
-    lower.includes("permission_denied") ||
-    lower.includes(" 401") ||
-    lower.includes(" 403")
+    lower.includes("permission_denied")
   ) {
     return {
       ok: false,
@@ -140,20 +171,11 @@ function classifyError(err: unknown, model: string): GeminiPrepareFailure {
     };
   }
 
-  if (lower.includes("429") || lower.includes("resource_exhausted") || lower.includes("rate limit")) {
+  if (status === 429 || lower.includes("resource_exhausted") || lower.includes("rate limit")) {
     return {
       ok: false,
       errorKind: "rate_limited",
       message: "Gemini is temporarily rate-limited. Please wait a moment and try again.",
-      model,
-    };
-  }
-
-  if (lower.includes("not found") && lower.includes("model")) {
-    return {
-      ok: false,
-      errorKind: "model_unavailable",
-      message: `The configured Gemini model ("${model}") is unavailable. Ask the project owner to update GEMINI_MODEL.`,
       model,
     };
   }
@@ -200,14 +222,14 @@ export async function prepareNewsWithGemini(input: GeminiPrepareInput): Promise<
     });
     responseText = response.text;
   } catch (err) {
-    // Temporary diagnostic: classifyError() below only ever returns a
-    // user-safe generic message, and nothing else in this path previously
-    // logged the raw exception -- so a failure here was otherwise
-    // invisible in Vercel's logs. Logging structured fields (rather than
-    // just the Error object) survives log-viewer truncation/formatting
-    // better and avoids ever leaking the API key, which the SDK does not
-    // include on the error object.
-    const errObj = err as { message?: unknown; name?: unknown; status?: unknown; statusText?: unknown; cause?: unknown };
+    // Kept permanently (not just for one-off diagnosis): classifyError()
+    // below only ever returns a user-safe generic message when it can't
+    // classify the error, so without this log line an unrecognized Gemini
+    // failure is otherwise invisible in Vercel's logs. Logging structured
+    // fields (rather than just the Error object) survives log-viewer
+    // truncation/formatting better and never includes the API key, which
+    // the SDK does not attach to the error object.
+    const errObj = err as GeminiSdkErrorLike;
     console.error("[Gemini diagnostic] prepareNewsWithGemini threw:", {
       name: errObj?.name,
       message: errObj?.message,
