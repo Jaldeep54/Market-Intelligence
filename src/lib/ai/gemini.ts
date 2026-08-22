@@ -200,6 +200,22 @@ export async function prepareNewsWithGemini(input: GeminiPrepareInput): Promise<
     });
     responseText = response.text;
   } catch (err) {
+    // Temporary diagnostic: classifyError() below only ever returns a
+    // user-safe generic message, and nothing else in this path previously
+    // logged the raw exception -- so a failure here was otherwise
+    // invisible in Vercel's logs. Logging structured fields (rather than
+    // just the Error object) survives log-viewer truncation/formatting
+    // better and avoids ever leaking the API key, which the SDK does not
+    // include on the error object.
+    const errObj = err as { message?: unknown; name?: unknown; status?: unknown; statusText?: unknown; cause?: unknown };
+    console.error("[Gemini diagnostic] prepareNewsWithGemini threw:", {
+      name: errObj?.name,
+      message: errObj?.message,
+      status: errObj?.status,
+      statusText: errObj?.statusText,
+      cause: errObj?.cause,
+      model,
+    });
     return classifyError(err, model);
   }
 
