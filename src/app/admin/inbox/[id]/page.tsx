@@ -128,10 +128,6 @@ export default async function CandidateReviewPage({ params }: { params: Promise<
             />
           </div>
 
-          {candidate.gemini_error && !candidate.prepared_title && (
-            <p className="mt-2 text-xs text-danger">{candidate.gemini_error}</p>
-          )}
-
           <div className="mt-6">
             <CandidateReviewForm
               action={boundSaveOrPublish}
