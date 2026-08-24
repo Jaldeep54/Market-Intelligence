@@ -1,29 +1,61 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useRef, useState, useTransition } from "react";
 import { NEWS_CATEGORIES, type Company, type NewsWithRelations } from "@/lib/types/database";
-import type { NewsFormState } from "@/lib/actions/news";
+import type { GenerateNewsDraftState, NewsFormState } from "@/lib/actions/news";
 
 type Action = (state: NewsFormState, formData: FormData) => Promise<NewsFormState>;
+type GenerateAction = (sourceUrl: string) => Promise<GenerateNewsDraftState>;
 
 export function NewsForm({
   action,
   companies,
   initial,
   submitLabel,
+  generateAction,
 }: {
   action: Action;
   companies: Company[];
   initial?: NewsWithRelations;
   submitLabel: string;
+  generateAction?: GenerateAction;
 }) {
   const [state, formAction, pending] = useActionState<NewsFormState, FormData>(action, {});
+  const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [tags, setTags] = useState(initial?.tags.map((t) => t.name).join(", ") ?? "");
+  const sourceUrlRef = useRef<HTMLInputElement>(null);
+
+  const [generating, startGenerating] = useTransition();
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const wordCount = useMemo(
     () => description.trim().split(/\s+/).filter(Boolean).length,
     [description]
   );
+
+  function handleGenerate() {
+    const sourceUrl = sourceUrlRef.current?.value.trim() ?? "";
+    if (!sourceUrl) {
+      setGenerateError("Enter a source URL before generating with Gemini.");
+      return;
+    }
+    if (!generateAction) return;
+
+    setGenerateError(null);
+    startGenerating(async () => {
+      const result = await generateAction(sourceUrl);
+      if (result.error) {
+        setGenerateError(result.error);
+        return;
+      }
+      if (result.data) {
+        setTitle(result.data.title);
+        setDescription(result.data.description);
+        setTags(result.data.tags.join(", "));
+      }
+    });
+  }
 
   return (
     <form action={formAction} className="max-w-2xl space-y-5">
@@ -35,7 +67,8 @@ export function NewsForm({
           id="title"
           name="title"
           required
-          defaultValue={initial?.title}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
@@ -124,7 +157,8 @@ export function NewsForm({
           <input
             id="tags"
             name="tags"
-            defaultValue={initial?.tags.map((t) => t.name).join(", ")}
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
             placeholder="policy, exports, capacity"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
@@ -140,10 +174,16 @@ export function NewsForm({
           name="source_url"
           type="url"
           required
+          ref={sourceUrlRef}
           defaultValue={initial?.source_url}
           placeholder="https://…"
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
+        {generateAction && (
+          <p className="mt-1 text-xs text-muted">
+            Paste the article URL above, then use &ldquo;Generate with Gemini&rdquo; below to draft the fields.
+          </p>
+        )}
       </div>
 
       <label className="flex items-center gap-2 text-sm text-foreground">
@@ -156,15 +196,29 @@ export function NewsForm({
         Published (visible to viewers)
       </label>
 
+      {generateError && <p className="text-sm text-danger">{generateError}</p>}
       {state.error && <p className="text-sm text-danger">{state.error}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-      >
-        {pending ? "Saving…" : submitLabel}
-      </button>
+      <div className="flex items-center gap-3">
+        {generateAction && (
+          <button
+            type="button"
+            disabled={generating || pending}
+            onClick={handleGenerate}
+            className="rounded-lg border border-accent px-5 py-2 text-sm font-medium text-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {generating ? "Generating…" : "Generate with Gemini"}
+          </button>
+        )}
+
+        <button
+          type="submit"
+          disabled={pending || generating}
+          className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {pending ? "Saving…" : submitLabel}
+        </button>
+      </div>
     </form>
   );
 }
