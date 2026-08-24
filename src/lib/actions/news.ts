@@ -2,12 +2,60 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { newsSchema, parseTagsInput } from "@/lib/validation/news";
 import { syncTags } from "@/lib/utils/tags";
+import { extractArticleText } from "@/lib/utils/extractArticleText";
+import { generateNewsDraftFromUrl } from "@/lib/ai/gemini";
 
 export interface NewsFormState {
   error?: string;
+}
+
+export interface GenerateNewsDraftState {
+  error?: string;
+  data?: {
+    title: string;
+    description: string;
+    tags: string[];
+  };
+}
+
+const draftSourceUrlSchema = z.string().trim().url();
+
+// "Generate with Gemini" on the Add News page (spec section 2/3). Only ever
+// returns data for the client to populate into the form -- it never writes
+// to the `news` table. Publishing still requires an explicit
+// createNewsAction submit, same as every other article on this platform.
+export async function generateNewsDraftAction(sourceUrl: string): Promise<GenerateNewsDraftState> {
+  const parsedUrl = draftSourceUrlSchema.safeParse(sourceUrl);
+  if (!parsedUrl.success) {
+    return { error: "Enter a valid source URL before generating with Gemini." };
+  }
+
+  const extracted = await extractArticleText(parsedUrl.data);
+  if (!extracted.ok) {
+    return { error: extracted.error ?? "Could not read the article at this URL." };
+  }
+
+  const result = await generateNewsDraftFromUrl({
+    sourceUrl: parsedUrl.data,
+    pageTitle: extracted.title,
+    pageText: extracted.text,
+  });
+
+  if (!result.ok) {
+    return { error: result.message };
+  }
+
+  return {
+    data: {
+      title: result.data.title,
+      description: result.data.description,
+      tags: result.data.tags,
+    },
+  };
 }
 
 function readNewsForm(formData: FormData) {
