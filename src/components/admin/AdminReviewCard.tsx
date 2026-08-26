@@ -90,6 +90,15 @@ export function AdminReviewCard({
         </a>
       </div>
 
+      {!candidate.prepared_title ? (
+        <p className="mt-2 text-xs text-amber-600">
+          Not yet prepared by Gemini -- showing the original scraped title/description below.
+          {candidate.gemini_error ? ` Last attempt: ${candidate.gemini_error}` : ""}
+        </p>
+      ) : (
+        candidate.gemini_error && <p className="mt-2 text-xs text-amber-600">Gemini note: {candidate.gemini_error}</p>
+      )}
+
       <div className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Title</label>

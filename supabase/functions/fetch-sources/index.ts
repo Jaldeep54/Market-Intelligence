@@ -515,8 +515,31 @@ async function fetchFeed(websiteUrl: string, feedUrl: string | null): Promise<Fe
 // ---------------------------------------------------------------------------
 
 const GEMINI_DEFAULT_MODEL = "gemini-3.6-flash";
+const GEMINI_MIN_DESCRIPTION_WORDS = 60;
 const GEMINI_MAX_DESCRIPTION_WORDS = 70;
 const GEMINI_MAX_ATTEMPTS = 2;
+
+function isWithinGeminiWordRange(words: number): boolean {
+  return words >= GEMINI_MIN_DESCRIPTION_WORDS && words <= GEMINI_MAX_DESCRIPTION_WORDS;
+}
+
+// Mirrors applyWordCountFallback() in src/lib/ai/gemini.ts: never silently
+// publish an out-of-range description after retries are exhausted. Over 70
+// words is truncated (safe -- only removes words); under 60 is left as-is
+// (padding would mean inventing content) but always flagged.
+function applyGeminiWordCountFallback(description: string, words: number): { text: string; note: string } {
+  if (words > GEMINI_MAX_DESCRIPTION_WORDS) {
+    const truncated = description.trim().split(/\s+/).slice(0, GEMINI_MAX_DESCRIPTION_WORDS).join(" ");
+    return {
+      text: truncated,
+      note: `Gemini's description was ${words} words after ${GEMINI_MAX_ATTEMPTS} attempts -- truncated to ${GEMINI_MAX_DESCRIPTION_WORDS} words. Please review.`,
+    };
+  }
+  return {
+    text: description,
+    note: `Gemini's description was only ${words} words after ${GEMINI_MAX_ATTEMPTS} attempts (target is ${GEMINI_MIN_DESCRIPTION_WORDS}-${GEMINI_MAX_DESCRIPTION_WORDS}). Please review and expand if needed.`,
+  };
+}
 const NEWS_CATEGORY_VALUES: NewsCategory[] = [
   "Global Market",
   "Indian Market",
@@ -544,7 +567,7 @@ interface GeminiPrepareOutput {
 }
 
 type GeminiPrepareResult =
-  | { ok: true; data: GeminiPrepareOutput; model: string }
+  | { ok: true; data: GeminiPrepareOutput; model: string; wordCountWarning?: string }
   | { ok: false; message: string; model: string };
 
 function countWords(text: string): number {
@@ -564,9 +587,9 @@ function geminiFallbackNewsDate(publishedAt: string | null): string {
 // Shared wording with src/lib/ai/gemini.ts's describeWordLimitInstruction().
 function describeWordLimitInstruction(retryWordCount: number | null): string {
   const base =
-    'STRICT MAXIMUM of 70 words -- never exceed 70 words under any circumstances. Aim for approximately 60-70 words when the article provides enough information. Retain the most important facts, developments, companies, figures, and implications. Do not invent or add information that is not present in the source. Do not use unnecessary introductory phrases such as "This article discusses...", "According to the article...", or "The report highlights...". Write in a professional tone suitable for an internal market intelligence briefing.';
+    'The description MUST be between 60 and 70 words (inclusive) -- this is a strict requirement, not a suggestion. Never go under 60 words or over 70 words. Retain the most important facts, developments, companies, figures, and implications. Do not invent or add information that is not present in the source. Do not use unnecessary introductory phrases such as "This article discusses...", "According to the article...", or "The report highlights...". Write in a professional tone suitable for an internal market intelligence briefing.';
   if (!retryWordCount) return base;
-  return `${base} Your previous attempt was ${retryWordCount} words, which exceeds the limit -- rewrite it so it is 70 words or fewer.`;
+  return `${base} Your previous attempt was ${retryWordCount} words, which is outside the required 60-70 word range -- rewrite it so it is between 60 and 70 words.`;
 }
 
 function buildGeminiPrompt(input: GeminiPromptInput, retryWordCount: number | null): string {
@@ -721,7 +744,7 @@ async function prepareNewsWithGemini(input: GeminiPromptInput): Promise<GeminiPr
   }
 
   let retryWordCount: number | null = null;
-  let lastFailureMessage = "Gemini could not prepare this article. Please try again.";
+  let lastAttempt: { validated: ValidatedGeminiOutput; words: number } | null = null;
 
   for (let attempt = 0; attempt < GEMINI_MAX_ATTEMPTS; attempt++) {
     const result = await callGeminiJson(apiKey, model, buildGeminiPrompt(input, retryWordCount), "prepareNewsWithGemini (edge)");
@@ -733,9 +756,10 @@ async function prepareNewsWithGemini(input: GeminiPromptInput): Promise<GeminiPr
     }
 
     const words = countWords(validated.description);
-    if (words > GEMINI_MAX_DESCRIPTION_WORDS) {
+    lastAttempt = { validated, words };
+
+    if (!isWithinGeminiWordRange(words)) {
       retryWordCount = words;
-      lastFailureMessage = "Gemini could not summarize this article within the 70-word limit. Please try again.";
       continue;
     }
 
@@ -757,7 +781,29 @@ async function prepareNewsWithGemini(input: GeminiPromptInput): Promise<GeminiPr
     };
   }
 
-  return { ok: false, message: lastFailureMessage, model };
+  // Every attempt returned valid, well-formed JSON, but the description
+  // never landed in range -- fall back instead of discarding a perfectly
+  // usable title/category/date over a word count (mirrors
+  // prepareNewsWithGemini's fallback in src/lib/ai/gemini.ts).
+  const { validated, words } = lastAttempt!;
+  const { text: fallbackDescription, note } = applyGeminiWordCountFallback(validated.description, words);
+  const matchedCompany = validated.company_name
+    ? input.companyNames.find((n) => n.toLowerCase() === validated.company_name!.toLowerCase()) ?? null
+    : null;
+
+  return {
+    ok: true,
+    model,
+    data: {
+      title: validated.title,
+      description: fallbackDescription,
+      category: validated.category as NewsCategory,
+      companyName: matchedCompany,
+      newsDate: validated.news_date,
+      tags: validated.tags,
+    },
+    wordCountWarning: note,
+  };
 }
 
 // Mirrors runGeminiPrepare() in src/lib/automation/candidatePrepare.ts:
@@ -803,7 +849,10 @@ async function runGeminiPrepare(
       prepared_news_date: result.data.newsDate,
       prepared_tags: result.data.tags,
       gemini_last_run_at: new Date().toISOString(),
-      gemini_error: null,
+      // Reuses gemini_error as a non-fatal notice when the word-count
+      // fallback had to kick in (see prepareNewsWithGemini above) -- mirrors
+      // runGeminiPrepare() in src/lib/automation/candidatePrepare.ts.
+      gemini_error: result.wordCountWarning ?? null,
       status: nextStatus,
       reviewed_by: requestedBy,
       reviewed_at: new Date().toISOString(),
@@ -1020,6 +1069,14 @@ async function fetchOneSource(
         lookup,
         null,
         candidateStatus
+      );
+    } else {
+      // Never silent: if the insert-then-read-back above didn't return a
+      // row, auto-prepare is skipped entirely -- log it so that failure
+      // mode is visible in the Edge Function's logs instead of just looking
+      // like "Gemini never ran" with no trace.
+      console.error(
+        `[fetchOneSource] news_candidates insert for scraped_article ${articleRow.id} did not return a row -- skipped Gemini auto-prepare.`
       );
     }
 

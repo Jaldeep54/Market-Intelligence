@@ -129,7 +129,14 @@ export default async function CandidateReviewPage({ params }: { params: Promise<
           </div>
 
           <div className="mt-6">
+            {/* Keyed on gemini_last_run_at so a "Prepare with Gemini" run
+                remounts this form instead of leaving it showing whatever
+                was in its useState/defaultValue at first mount -- the
+                Server Component re-runs after revalidatePath and passes a
+                fresh `candidate`, but a client component's own uncontrolled
+                initial state does not re-sync from new props on its own. */}
             <CandidateReviewForm
+              key={candidate.gemini_last_run_at ?? candidate.id}
               action={boundSaveOrPublish}
               companies={companies}
               candidate={candidate}

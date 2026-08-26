@@ -203,6 +203,14 @@ async function fetchOneSource(
         null,
         candidateStatus
       );
+    } else {
+      // Never silent: if the insert-then-read-back above didn't return a
+      // row (RLS, a transient error, anything), auto-prepare is skipped
+      // entirely -- log it so that failure mode shows up in Vercel's logs
+      // instead of just looking like "Gemini never ran" with no trace.
+      console.error(
+        `[fetchOneSource] news_candidates insert for scraped_article ${articleRow.id} did not return a row -- skipped Gemini auto-prepare.`
+      );
     }
 
     newArticles++;
