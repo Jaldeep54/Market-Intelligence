@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { sourceSchema } from "@/lib/validation/sources";
+import { parseExcludeUrlPatterns, sourceSchema } from "@/lib/validation/sources";
 import {
   fetchAllActiveSources,
   fetchSingleSource,
@@ -25,6 +25,7 @@ function readSourceForm(formData: FormData) {
     priority: String(formData.get("priority") ?? ""),
     fetch_interval_minutes: String(formData.get("fetch_interval_minutes") ?? "120"),
     active: formData.get("active") === "on",
+    exclude_url_patterns: parseExcludeUrlPatterns(String(formData.get("exclude_urls") ?? "")),
   });
 }
 
@@ -47,6 +48,7 @@ export async function createSourceAction(
     priority: parsed.data.priority,
     fetch_interval_minutes: parsed.data.fetch_interval_minutes,
     active: parsed.data.active,
+    exclude_url_patterns: parsed.data.exclude_url_patterns,
   });
 
   if (error) return { error: error.message };
@@ -77,6 +79,7 @@ export async function updateSourceAction(
       priority: parsed.data.priority,
       fetch_interval_minutes: parsed.data.fetch_interval_minutes,
       active: parsed.data.active,
+      exclude_url_patterns: parsed.data.exclude_url_patterns,
     })
     .eq("id", id);
 

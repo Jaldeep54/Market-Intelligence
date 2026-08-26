@@ -28,10 +28,12 @@ export default async function AdminInboxPage({
       ? (raw.relevance as RelevanceLabel)
       : undefined;
   const sourceId = typeof raw.source === "string" && raw.source ? raw.source : undefined;
+  const dateFrom = typeof raw.dateFrom === "string" && raw.dateFrom ? raw.dateFrom : undefined;
+  const dateTo = typeof raw.dateTo === "string" && raw.dateTo ? raw.dateTo : undefined;
 
   const supabase = await createClient();
   const [candidates, counts, sources] = await Promise.all([
-    getInboxCandidates(supabase, { status, relevance, sourceId }),
+    getInboxCandidates(supabase, { status, relevance, sourceId, dateFrom, dateTo }),
     getInboxCounts(supabase),
     getSources(supabase),
   ]);
@@ -108,6 +110,30 @@ export default async function AdminInboxPage({
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label htmlFor="dateFrom" className="mb-1 block text-xs font-medium text-muted">
+            From date
+          </label>
+          <input
+            id="dateFrom"
+            name="dateFrom"
+            type="date"
+            defaultValue={dateFrom ?? ""}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label htmlFor="dateTo" className="mb-1 block text-xs font-medium text-muted">
+            To date
+          </label>
+          <input
+            id="dateTo"
+            name="dateTo"
+            type="date"
+            defaultValue={dateTo ?? ""}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          />
         </div>
         <button
           type="submit"

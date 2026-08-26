@@ -18,6 +18,16 @@ export const sourceSchema = z.object({
   priority: z.enum(SOURCE_PRIORITIES as [string, ...string[]], { message: "Select a priority" }),
   fetch_interval_minutes: z.coerce.number().int().min(15).max(1440),
   active: z.boolean(),
+  exclude_url_patterns: z.array(z.string().trim().min(1)).default([]),
 });
+
+// Splits the "Skip articles from these URLs" textarea into individual
+// patterns: one per line, trimmed, blank lines dropped.
+export function parseExcludeUrlPatterns(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
 
 export type SourceInput = z.infer<typeof sourceSchema>;

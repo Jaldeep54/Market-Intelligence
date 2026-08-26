@@ -9,6 +9,7 @@ const ITEMS = [
   { label: "News Management", href: "/admin/news" },
   { label: "Add News", href: "/admin/news/new" },
   { label: "News Inbox", href: "/admin/inbox" },
+  { label: "Admin News View", href: "/admin/review" },
   { label: "News Sources", href: "/admin/sources" },
   { label: "Automation", href: "/admin/automation" },
   { label: "Company Management", href: "/admin/companies" },

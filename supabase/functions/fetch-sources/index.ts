@@ -45,6 +45,7 @@ interface NewsSource {
   default_category: NewsCategory | null;
   priority: SourcePriority;
   fetch_interval_minutes: number;
+  exclude_url_patterns: string[];
   last_checked_at: string | null;
   last_success_at: string | null;
   last_error: string | null;
@@ -591,7 +592,14 @@ async function fetchOneSource(
   type RecentCandidate = { id: string; article: { original_title: string } | null };
   const recent = (recentCandidates ?? []) as unknown as RecentCandidate[];
 
+  const excludePatterns = source.exclude_url_patterns ?? [];
+
   for (const item of result.items) {
+    if (excludePatterns.some((pattern) => item.link.includes(pattern))) {
+      skipped++;
+      continue;
+    }
+
     const canonicalUrl = canonicalizeUrl(item.link);
     const hash = await contentHash(item.title, canonicalUrl);
 
