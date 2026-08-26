@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchFeed } from "@/lib/automation/feed";
 import { canonicalizeUrl, contentHash, titleSimilarity, POSSIBLE_DUPLICATE_THRESHOLD } from "@/lib/automation/duplicate";
 import { scoreRelevance } from "@/lib/automation/relevance";
+import { runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
 import type { AutomationBatchTrigger, NewsSource } from "@/lib/types/database";
 
 export interface SourceFetchSummary {
@@ -28,10 +29,7 @@ export interface BatchFetchSummary {
   perSource: SourceFetchSummary[];
 }
 
-interface CompanyLookup {
-  companyNames: string[];
-  companyIdByName: Map<string, string>;
-}
+type CompanyLookup = GeminiCompanyLookup;
 
 async function loadCompanyLookup(supabase: SupabaseClient): Promise<CompanyLookup> {
   const { data: companies } = await supabase.from("companies").select("id,name");
@@ -102,7 +100,14 @@ async function fetchOneSource(
   type RecentCandidate = { id: string; article: { original_title: string } | null };
   const recent = (recentCandidates ?? []) as unknown as RecentCandidate[];
 
+  const excludePatterns = source.exclude_url_patterns ?? [];
+
   for (const item of result.items) {
+    if (excludePatterns.some((pattern) => item.link.includes(pattern))) {
+      skipped++;
+      continue;
+    }
+
     const canonicalUrl = canonicalizeUrl(item.link);
     const hash = contentHash(item.title, canonicalUrl);
 
@@ -156,19 +161,49 @@ async function fetchOneSource(
       ? lookup.companyIdByName.get(relevance.matchedCompanyName.toLowerCase()) ?? null
       : null;
 
-    await supabase.from("news_candidates").insert({
-      scraped_article_id: articleRow.id,
-      source_id: source.id,
-      status: relevance.label === "needs_review" ? "needs_review" : "new",
-      relevance_label: relevance.label,
-      relevance_score: relevance.score,
-      suggested_category: source.default_category,
-      suggested_company_id: suggestedCompanyId,
-      possible_duplicate_of: possibleDuplicateOf,
-      duplicate_note: possibleDuplicateOf
-        ? "A recently discovered article has a very similar title -- this may be the same story."
-        : null,
-    });
+    const candidateStatus = relevance.label === "needs_review" ? "needs_review" : "new";
+
+    const { data: candidateRow } = await supabase
+      .from("news_candidates")
+      .insert({
+        scraped_article_id: articleRow.id,
+        source_id: source.id,
+        status: candidateStatus,
+        relevance_label: relevance.label,
+        relevance_score: relevance.score,
+        suggested_category: source.default_category,
+        suggested_company_id: suggestedCompanyId,
+        possible_duplicate_of: possibleDuplicateOf,
+        duplicate_note: possibleDuplicateOf
+          ? "A recently discovered article has a very similar title -- this may be the same story."
+          : null,
+      })
+      .select("id")
+      .single();
+
+    // Auto-prepare with Gemini right at ingestion so the Admin News View has
+    // a ready-to-publish title/description without a manual click. Awaited
+    // sequentially (never fanned out) to respect Gemini rate limits, same as
+    // every other per-source step in this loop. Every brand-new candidate
+    // has prepared_title/reviewed_by unset by construction, satisfying the
+    // "never overwrite a human edit" rule without an extra guard query.
+    if (candidateRow) {
+      await runGeminiPrepare(
+        supabase,
+        candidateRow.id,
+        {
+          sourceName: source.source_name,
+          originalTitle: item.title,
+          originalDescription: description,
+          rawContent: item.contentEncoded ?? null,
+          publishedAt: item.publishedAt,
+          sourceUrl: item.link,
+        },
+        lookup,
+        null,
+        candidateStatus
+      );
+    }
 
     newArticles++;
   }

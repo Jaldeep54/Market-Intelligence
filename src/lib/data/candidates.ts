@@ -27,10 +27,21 @@ type PossibleDuplicate = NonNullable<NewsCandidateWithArticle["possible_duplicat
 interface RawCandidateRow {
   [key: string]: unknown;
   possible_duplicate_of: string | null;
+  prepared_news_date: string | null;
+  created_at: string;
   article: NewsCandidateWithArticle["article"];
   source: { id: string; source_name: string; priority: string } | null;
   suggested_company: { id: string; name: string } | null;
   prepared_company: { id: string; name: string } | null;
+}
+
+// The date used for "latest first" ordering and the date filter: prefer the
+// prepared news date (the date the admin will actually publish under), fall
+// back to the original article's published date, then to when we discovered
+// it -- a fallback across joined tables that PostgREST can't order/filter on
+// directly, so this is applied in JS after fetch.
+export function effectiveCandidateDate(candidate: NewsCandidateWithArticle): string | null {
+  return candidate.prepared_news_date ?? candidate.article.published_at ?? candidate.created_at ?? null;
 }
 
 // Fetches possible-duplicate summaries (id, prepared_title, article title)
@@ -70,6 +81,8 @@ export interface InboxFilterParams {
   status?: CandidateStatus;
   relevance?: RelevanceLabel;
   sourceId?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 const INBOX_LIMIT = 300;
@@ -97,7 +110,26 @@ export async function getInboxCandidates(
   );
   const duplicates = await loadPossibleDuplicates(supabase, duplicateIds);
 
-  return rows.map((row) => mapRow(row, duplicates));
+  let candidates = rows.map((row) => mapRow(row, duplicates));
+
+  if (params.dateFrom || params.dateTo) {
+    candidates = candidates.filter((c) => {
+      const effective = effectiveCandidateDate(c);
+      if (!effective) return false;
+      const effectiveDay = effective.slice(0, 10);
+      if (params.dateFrom && effectiveDay < params.dateFrom) return false;
+      if (params.dateTo && effectiveDay > params.dateTo) return false;
+      return true;
+    });
+  }
+
+  candidates.sort((a, b) => {
+    const da = effectiveCandidateDate(a);
+    const db = effectiveCandidateDate(b);
+    return new Date(db ?? 0).getTime() - new Date(da ?? 0).getTime();
+  });
+
+  return candidates;
 }
 
 export async function getCandidateById(

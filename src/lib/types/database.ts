@@ -170,6 +170,7 @@ export interface NewsSource {
   default_category: NewsCategory | null;
   priority: SourcePriority;
   fetch_interval_minutes: number;
+  exclude_url_patterns: string[];
   last_checked_at: string | null;
   last_success_at: string | null;
   last_error: string | null;

@@ -1,9 +1,15 @@
 // Scheduled news-source check, invoked every 2 hours by Supabase pg_cron
 // (via pg_net) -- see supabase/migrations/20260101000007_supabase_cron_dispatch.sql.
 // Never publishes anything: it only writes to news_sources / scraped_articles
-// / news_candidates / automation_runs, exactly like "Fetch All Active
-// Sources" in the Admin UI. Gemini is never called from here (spec: Gemini
-// only runs when the admin clicks "Prepare with Gemini" in the app).
+// / news_candidates / automation_runs / ai_processing_logs, exactly like
+// "Fetch All Active Sources" in the Admin UI. Each newly discovered
+// candidate is also auto-prepared with Gemini here, sequentially, right
+// after it's inserted -- mirroring src/lib/automation/candidatePrepare.ts --
+// so the Admin News View has a ready draft without a manual click. This
+// never overwrites a human edit: only just-inserted candidates (which by
+// construction have no prepared_title and no reviewed_by yet) are
+// auto-prepared. The admin's manual "Prepare with Gemini" button in the app
+// is unaffected and still works as a regenerate/retry option.
 //
 // Auth: this function keeps Supabase's default JWT verification ON (no
 // `--no-verify-jwt`, no custom header check in this file). The cron job
@@ -14,7 +20,14 @@
 //
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY below are provided
 // automatically by the Supabase Edge Function runtime for every function in
-// this project -- nothing else to configure as a secret for this function.
+// this project. GEMINI_API_KEY *must* be set as a secret on this function
+// (Supabase Dashboard -> Edge Functions -> fetch-sources -> Secrets) for
+// auto-prepare to run -- it is a separate secret store from Vercel's env
+// vars, so setting GEMINI_API_KEY for the Next.js app does not also cover
+// this function. GEMINI_MODEL is optional and defaults the same way the
+// Next.js app does. If GEMINI_API_KEY is missing, candidates are still
+// discovered normally; they just aren't auto-prepared (each attempt logs an
+// "error" row to ai_processing_logs, same as any other Gemini failure).
 //
 // This file is intentionally self-contained (single-file, no local project
 // imports) so it can be pasted directly into Supabase Dashboard -> Edge
@@ -45,6 +58,7 @@ interface NewsSource {
   default_category: NewsCategory | null;
   priority: SourcePriority;
   fetch_interval_minutes: number;
+  exclude_url_patterns: string[];
   last_checked_at: string | null;
   last_success_at: string | null;
   last_error: string | null;
@@ -489,6 +503,315 @@ async function fetchFeed(websiteUrl: string, feedUrl: string | null): Promise<Fe
 }
 
 // ---------------------------------------------------------------------------
+// Gemini auto-prepare -- mirrors src/lib/ai/gemini.ts (prepareNewsWithGemini)
+// and src/lib/automation/candidatePrepare.ts (runGeminiPrepare). Ported by
+// hand rather than imported (this file has no local project imports), so
+// keep the prompt wording, word limit, retry count, and error classification
+// in sync if either side changes. Calls the Gemini REST API directly via
+// fetch instead of the @google/genai SDK used by the Next.js app -- that
+// SDK's Node-oriented build isn't guaranteed to run under this Edge
+// Function's Deno runtime, and the REST call below is exactly what the SDK
+// does internally.
+// ---------------------------------------------------------------------------
+
+const GEMINI_DEFAULT_MODEL = "gemini-3.6-flash";
+const GEMINI_MAX_DESCRIPTION_WORDS = 70;
+const GEMINI_MAX_ATTEMPTS = 2;
+const NEWS_CATEGORY_VALUES: NewsCategory[] = [
+  "Global Market",
+  "Indian Market",
+  "Top Company News",
+  "Analytical News",
+];
+
+interface GeminiPromptInput {
+  sourceName: string;
+  originalTitle: string;
+  originalDescription: string | null;
+  rawContent: string | null;
+  publishedAt: string | null;
+  sourceUrl: string;
+  companyNames: string[];
+}
+
+interface GeminiPrepareOutput {
+  title: string;
+  description: string;
+  category: NewsCategory;
+  companyName: string | null;
+  newsDate: string;
+  tags: string[];
+}
+
+type GeminiPrepareResult =
+  | { ok: true; data: GeminiPrepareOutput; model: string }
+  | { ok: false; message: string; model: string };
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function resolveGeminiModel(): string {
+  return Deno.env.get("GEMINI_MODEL")?.trim() || GEMINI_DEFAULT_MODEL;
+}
+
+function geminiFallbackNewsDate(publishedAt: string | null): string {
+  const source = publishedAt ? new Date(publishedAt) : new Date();
+  if (Number.isNaN(source.getTime())) return new Date().toISOString().slice(0, 10);
+  return source.toISOString().slice(0, 10);
+}
+
+// Shared wording with src/lib/ai/gemini.ts's describeWordLimitInstruction().
+function describeWordLimitInstruction(retryWordCount: number | null): string {
+  const base =
+    'STRICT MAXIMUM of 70 words -- never exceed 70 words under any circumstances. Aim for approximately 60-70 words when the article provides enough information. Retain the most important facts, developments, companies, figures, and implications. Do not invent or add information that is not present in the source. Do not use unnecessary introductory phrases such as "This article discusses...", "According to the article...", or "The report highlights...". Write in a professional tone suitable for an internal market intelligence briefing.';
+  if (!retryWordCount) return base;
+  return `${base} Your previous attempt was ${retryWordCount} words, which exceeds the limit -- rewrite it so it is 70 words or fewer.`;
+}
+
+function buildGeminiPrompt(input: GeminiPromptInput, retryWordCount: number | null): string {
+  const contentExcerpt = (input.rawContent ?? input.originalDescription ?? "").slice(0, 6000);
+
+  return `You are preparing a solar-industry market intelligence brief for a CTO-level executive dashboard.
+
+Source: ${input.sourceName}
+Original headline: ${input.originalTitle}
+Published: ${input.publishedAt ?? "unknown"}
+Original URL: ${input.sourceUrl}
+
+Article excerpt/description:
+"""
+${contentExcerpt || "(no additional content available -- use the headline and description only)"}
+"""
+
+Tracked companies (choose one only if the article is clearly about it, otherwise use null -- never invent a company that isn't in this list):
+${input.companyNames.length > 0 ? input.companyNames.map((n) => `- ${n}`).join("\n") : "(none configured)"}
+
+Return a JSON object with exactly these fields:
+- "title": a concise, professional headline suitable for a CTO-level dashboard. Avoid sensational language.
+- "description": ${describeWordLimitInstruction(retryWordCount)}
+- "category": exactly one of "Global Market", "Indian Market", "Top Company News", "Analytical News".
+- "company_name": the exact name of one tracked company from the list above if the article is clearly about it, otherwise null.
+- "news_date": the article's publication date as YYYY-MM-DD (use ${geminiFallbackNewsDate(input.publishedAt)} if the date is unclear).
+- "tags": 2 to 4 short, useful lowercase tags, no hashtags.
+
+Return only the JSON object.`;
+}
+
+// Mirrors classifyError() in src/lib/ai/gemini.ts, adapted to a plain HTTP
+// status + response body (there's no SDK error object here).
+function classifyGeminiError(status: number | null, message: string, model: string): string {
+  const lower = message.toLowerCase();
+
+  if (
+    status === 404 ||
+    (lower.includes("model") &&
+      (lower.includes("not found") || lower.includes("not_found") || lower.includes("no longer available")))
+  ) {
+    return `The configured Gemini model ("${model}") is unavailable. Ask the project owner to update GEMINI_MODEL.`;
+  }
+  if (
+    status === 401 ||
+    status === 403 ||
+    lower.includes("api key not valid") ||
+    lower.includes("api_key_invalid") ||
+    lower.includes("permission_denied")
+  ) {
+    return "Gemini rejected the configured API key. Ask the project owner to check GEMINI_API_KEY.";
+  }
+  if (lower.includes("quota")) {
+    return "Gemini free-tier quota has been reached. Please try again later or change the configured model.";
+  }
+  if (status === 429 || lower.includes("resource_exhausted") || lower.includes("rate limit")) {
+    return "Gemini is temporarily rate-limited. Please wait a moment and try again.";
+  }
+  return "Gemini could not prepare this article. Please try again.";
+}
+
+interface ValidatedGeminiOutput {
+  title: string;
+  description: string;
+  category: string;
+  company_name: string | null;
+  news_date: string;
+  tags: string[];
+}
+
+// Defense in depth, same as geminiOutputSchema (zod) in src/lib/ai/gemini.ts,
+// just hand-written since this file has no dependency on zod.
+function validateGeminiOutput(raw: unknown): ValidatedGeminiOutput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+
+  const title = typeof obj.title === "string" ? obj.title.trim() : "";
+  const description = typeof obj.description === "string" ? obj.description.trim() : "";
+  const category = typeof obj.category === "string" ? obj.category : "";
+  const companyName =
+    obj.company_name === null ? null : typeof obj.company_name === "string" ? obj.company_name.trim() : undefined;
+  const newsDate = typeof obj.news_date === "string" ? obj.news_date.trim() : "";
+  const tags = Array.isArray(obj.tags)
+    ? obj.tags.filter((t): t is string => typeof t === "string" && t.trim().length > 0).slice(0, 6)
+    : null;
+
+  if (!title || title.length > 300) return null;
+  if (!description || description.length > 1200) return null;
+  if (!NEWS_CATEGORY_VALUES.includes(category as NewsCategory)) return null;
+  if (companyName === undefined || (companyName !== null && companyName.length === 0)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newsDate)) return null;
+  if (!tags || tags.length === 0) return null;
+
+  return { title, description, category, company_name: companyName, news_date: newsDate, tags };
+}
+
+async function callGeminiJson(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  logLabel: string
+): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.3 },
+      }),
+    });
+  } catch (err) {
+    console.error(`[Gemini diagnostic] ${logLabel} network error:`, err);
+    return { ok: false, message: "Gemini could not be reached. Please try again." };
+  }
+
+  if (!response.ok) {
+    const bodyText = await response.text().catch(() => "");
+    console.error(`[Gemini diagnostic] ${logLabel} HTTP error:`, {
+      status: response.status,
+      body: bodyText.slice(0, 500),
+      model,
+    });
+    return { ok: false, message: classifyGeminiError(response.status, bodyText, model) };
+  }
+
+  const json = await response.json().catch(() => null);
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    return { ok: false, message: "Gemini returned an empty response. Please try again." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, message: "Gemini's response could not be understood. Please try again." };
+  }
+
+  return { ok: true, data: parsed };
+}
+
+async function prepareNewsWithGemini(input: GeminiPromptInput): Promise<GeminiPrepareResult> {
+  const model = resolveGeminiModel();
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+
+  if (!apiKey) {
+    return { ok: false, message: "Gemini is not configured yet. Ask the project owner to set GEMINI_API_KEY.", model };
+  }
+
+  let retryWordCount: number | null = null;
+  let lastFailureMessage = "Gemini could not prepare this article. Please try again.";
+
+  for (let attempt = 0; attempt < GEMINI_MAX_ATTEMPTS; attempt++) {
+    const result = await callGeminiJson(apiKey, model, buildGeminiPrompt(input, retryWordCount), "prepareNewsWithGemini (edge)");
+    if (!result.ok) return { ok: false, message: result.message, model };
+
+    const validated = validateGeminiOutput(result.data);
+    if (!validated) {
+      return { ok: false, message: "Gemini's response did not match the required format. Please try again.", model };
+    }
+
+    const words = countWords(validated.description);
+    if (words > GEMINI_MAX_DESCRIPTION_WORDS) {
+      retryWordCount = words;
+      lastFailureMessage = "Gemini could not summarize this article within the 70-word limit. Please try again.";
+      continue;
+    }
+
+    const matchedCompany = validated.company_name
+      ? input.companyNames.find((n) => n.toLowerCase() === validated.company_name!.toLowerCase()) ?? null
+      : null;
+
+    return {
+      ok: true,
+      model,
+      data: {
+        title: validated.title,
+        description: validated.description,
+        category: validated.category as NewsCategory,
+        companyName: matchedCompany,
+        newsDate: validated.news_date,
+        tags: validated.tags,
+      },
+    };
+  }
+
+  return { ok: false, message: lastFailureMessage, model };
+}
+
+// Mirrors runGeminiPrepare() in src/lib/automation/candidatePrepare.ts:
+// same ai_processing_logs row and same news_candidates update on success or
+// failure. `requestedBy` is always null here (this function only ever runs
+// automatically, never from an admin click).
+async function runGeminiPrepare(
+  supabase: SupabaseClient,
+  candidateId: string,
+  article: Omit<GeminiPromptInput, "companyNames">,
+  lookup: CompanyLookup,
+  requestedBy: string | null,
+  currentStatus: string
+): Promise<void> {
+  const result = await prepareNewsWithGemini({ ...article, companyNames: lookup.companyNames });
+
+  await supabase.from("ai_processing_logs").insert({
+    candidate_id: candidateId,
+    model: result.model,
+    status: result.ok ? "success" : "error",
+    error_message: result.ok ? null : result.message,
+    requested_by: requestedBy,
+  });
+
+  if (!result.ok) {
+    await supabase.from("news_candidates").update({ gemini_error: result.message }).eq("id", candidateId);
+    return;
+  }
+
+  const matchedCompanyId = result.data.companyName
+    ? lookup.companyIdByName.get(result.data.companyName.toLowerCase()) ?? null
+    : null;
+
+  const nextStatus = currentStatus === "published" || currentStatus === "rejected" ? currentStatus : "prepared";
+
+  await supabase
+    .from("news_candidates")
+    .update({
+      prepared_title: result.data.title,
+      prepared_description: result.data.description,
+      prepared_category: result.data.category,
+      prepared_company_id: matchedCompanyId,
+      prepared_news_date: result.data.newsDate,
+      prepared_tags: result.data.tags,
+      gemini_last_run_at: new Date().toISOString(),
+      gemini_error: null,
+      status: nextStatus,
+      reviewed_by: requestedBy,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", candidateId);
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration: per-source fetch, canonical-URL dedupe, relevance scoring,
 // possible-duplicate flagging, automation_runs logging. Same behavior as
 // fetchAllActiveSources() in src/lib/automation/fetchSources.ts.
@@ -591,7 +914,14 @@ async function fetchOneSource(
   type RecentCandidate = { id: string; article: { original_title: string } | null };
   const recent = (recentCandidates ?? []) as unknown as RecentCandidate[];
 
+  const excludePatterns = source.exclude_url_patterns ?? [];
+
   for (const item of result.items) {
+    if (excludePatterns.some((pattern) => item.link.includes(pattern))) {
+      skipped++;
+      continue;
+    }
+
     const canonicalUrl = canonicalizeUrl(item.link);
     const hash = await contentHash(item.title, canonicalUrl);
 
@@ -649,19 +979,49 @@ async function fetchOneSource(
       ? lookup.companyIdByName.get(relevance.matchedCompanyName.toLowerCase()) ?? null
       : null;
 
-    await supabase.from("news_candidates").insert({
-      scraped_article_id: articleRow.id,
-      source_id: source.id,
-      status: relevance.label === "needs_review" ? "needs_review" : "new",
-      relevance_label: relevance.label,
-      relevance_score: relevance.score,
-      suggested_category: source.default_category,
-      suggested_company_id: suggestedCompanyId,
-      possible_duplicate_of: possibleDuplicateOf,
-      duplicate_note: possibleDuplicateOf
-        ? "A recently discovered article has a very similar title -- this may be the same story."
-        : null,
-    });
+    const candidateStatus = relevance.label === "needs_review" ? "needs_review" : "new";
+
+    const { data: candidateRow } = await supabase
+      .from("news_candidates")
+      .insert({
+        scraped_article_id: articleRow.id,
+        source_id: source.id,
+        status: candidateStatus,
+        relevance_label: relevance.label,
+        relevance_score: relevance.score,
+        suggested_category: source.default_category,
+        suggested_company_id: suggestedCompanyId,
+        possible_duplicate_of: possibleDuplicateOf,
+        duplicate_note: possibleDuplicateOf
+          ? "A recently discovered article has a very similar title -- this may be the same story."
+          : null,
+      })
+      .select("id")
+      .single();
+
+    // Auto-prepare with Gemini right at ingestion (see the Gemini
+    // auto-prepare section above), sequentially and awaited to respect
+    // rate limits -- same as the Node fetch engine. If GEMINI_API_KEY isn't
+    // set as a secret on this function, this logs a "missing_key"-style
+    // error to ai_processing_logs per candidate rather than silently
+    // skipping, exactly like the Node path behaves without that env var.
+    if (candidateRow) {
+      await runGeminiPrepare(
+        supabase,
+        candidateRow.id,
+        {
+          sourceName: source.source_name,
+          originalTitle: item.title,
+          originalDescription: description,
+          rawContent: item.contentEncoded ?? null,
+          publishedAt: item.publishedAt,
+          sourceUrl: item.link,
+        },
+        lookup,
+        null,
+        candidateStatus
+      );
+    }
 
     newArticles++;
   }

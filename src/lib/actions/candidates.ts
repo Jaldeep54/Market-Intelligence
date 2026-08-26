@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCandidateById } from "@/lib/data/candidates";
 import { getCompanies } from "@/lib/data/companies";
-import { prepareNewsWithGemini } from "@/lib/ai/gemini";
+import { runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
 import { readCandidatePrepForm } from "@/lib/validation/candidates";
 import { syncTags } from "@/lib/utils/tags";
 
@@ -15,65 +15,44 @@ export interface CandidateActionState {
 
 // "Prepare with Gemini" -- runs only when the admin clicks it (spec section
 // 18). Every attempt is logged to ai_processing_logs regardless of outcome.
+// Shares its Gemini-call-and-persist logic with the automatic prepare that
+// runs at ingestion time in fetchOneSource (src/lib/automation/fetchSources.ts)
+// via runGeminiPrepare -- this action just supplies the admin's user id as
+// `requestedBy` where the automatic path passes null.
 export async function prepareCandidateWithGeminiAction(candidateId: string): Promise<CandidateActionState> {
   const supabase = await createClient();
   const candidate = await getCandidateById(supabase, candidateId);
   if (!candidate) return { error: "This article could not be found." };
 
   const companies = await getCompanies(supabase);
-  const companyNames = companies.map((c) => c.name);
-
-  const result = await prepareNewsWithGemini({
-    sourceName: candidate.article.source_name,
-    originalTitle: candidate.article.original_title,
-    originalDescription: candidate.article.original_description,
-    rawContent: candidate.article.raw_content,
-    publishedAt: candidate.article.published_at,
-    sourceUrl: candidate.article.original_url,
-    companyNames,
-  });
+  const lookup: GeminiCompanyLookup = {
+    companyNames: companies.map((c) => c.name),
+    companyIdByName: new Map(companies.map((c) => [c.name.toLowerCase(), c.id])),
+  };
 
   const { data: userData } = await supabase.auth.getUser();
 
-  await supabase.from("ai_processing_logs").insert({
-    candidate_id: candidateId,
-    model: result.model,
-    status: result.ok ? "success" : "error",
-    error_message: result.ok ? null : result.message,
-    requested_by: userData.user?.id ?? null,
-  });
-
-  if (!result.ok) {
-    await supabase.from("news_candidates").update({ gemini_error: result.message }).eq("id", candidateId);
-    revalidatePath(`/admin/inbox/${candidateId}`);
-    return { error: result.message };
-  }
-
-  const matchedCompany = result.data.companyName
-    ? companies.find((c) => c.name.toLowerCase() === result.data.companyName!.toLowerCase())
-    : null;
-
-  const nextStatus = candidate.status === "published" || candidate.status === "rejected" ? candidate.status : "prepared";
-
-  await supabase
-    .from("news_candidates")
-    .update({
-      prepared_title: result.data.title,
-      prepared_description: result.data.description,
-      prepared_category: result.data.category,
-      prepared_company_id: matchedCompany?.id ?? null,
-      prepared_news_date: result.data.newsDate,
-      prepared_tags: result.data.tags,
-      gemini_last_run_at: new Date().toISOString(),
-      gemini_error: null,
-      status: nextStatus,
-      reviewed_by: userData.user?.id ?? null,
-      reviewed_at: new Date().toISOString(),
-    })
-    .eq("id", candidateId);
+  const result = await runGeminiPrepare(
+    supabase,
+    candidateId,
+    {
+      sourceName: candidate.article.source_name,
+      originalTitle: candidate.article.original_title,
+      originalDescription: candidate.article.original_description,
+      rawContent: candidate.article.raw_content,
+      publishedAt: candidate.article.published_at,
+      sourceUrl: candidate.article.original_url,
+    },
+    lookup,
+    userData.user?.id ?? null,
+    candidate.status
+  );
 
   revalidatePath(`/admin/inbox/${candidateId}`);
   revalidatePath("/admin/inbox");
+  revalidatePath("/admin/review");
+
+  if (!result.ok) return { error: result.error };
   return {};
 }
 
@@ -134,8 +113,39 @@ async function saveCandidate(candidateId: string, formData: FormData): Promise<C
 }
 
 // The only path that ever writes into the existing `news` table. Requires a
-// human click; Gemini output alone never publishes (spec section 22).
+// human click; Gemini output alone never publishes (spec section 22). Shared
+// by the full-page review form (which redirects back to the inbox list) and
+// the Admin News View card (which stays on the same page and removes the
+// card optimistically) -- see performPublish below.
 async function publishCandidate(candidateId: string, formData: FormData): Promise<CandidateActionState> {
+  const result = await performPublish(candidateId, formData);
+  if (result.error) return result;
+
+  revalidatePath("/admin/inbox");
+  revalidatePath("/admin/review");
+  revalidatePath("/admin/news");
+  revalidatePath("/");
+  redirect("/admin/inbox");
+}
+
+// Thin wrapper around the same publish logic for the Admin News View: no
+// redirect, since that page removes the published card from its own list
+// instead of navigating away.
+export async function publishCandidateInlineAction(
+  candidateId: string,
+  formData: FormData
+): Promise<CandidateActionState> {
+  const result = await performPublish(candidateId, formData);
+  if (result.error) return result;
+
+  revalidatePath("/admin/inbox");
+  revalidatePath("/admin/review");
+  revalidatePath("/admin/news");
+  revalidatePath("/");
+  return {};
+}
+
+async function performPublish(candidateId: string, formData: FormData): Promise<CandidateActionState> {
   const parsed = readCandidatePrepForm(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
@@ -201,10 +211,7 @@ async function publishCandidate(candidateId: string, formData: FormData): Promis
     })
     .eq("id", candidateId);
 
-  revalidatePath("/admin/inbox");
-  revalidatePath("/admin/news");
-  revalidatePath("/");
-  redirect("/admin/inbox");
+  return {};
 }
 
 export async function rejectCandidateAction(candidateId: string) {
@@ -212,6 +219,7 @@ export async function rejectCandidateAction(candidateId: string) {
   await supabase.from("news_candidates").update({ status: "rejected" }).eq("id", candidateId);
   revalidatePath("/admin/inbox");
   revalidatePath(`/admin/inbox/${candidateId}`);
+  revalidatePath("/admin/review");
 }
 
 export async function markDuplicateCandidateAction(candidateId: string) {
@@ -230,4 +238,33 @@ export async function keepCandidateAction(candidateId: string) {
     .eq("id", candidateId);
   revalidatePath("/admin/inbox");
   revalidatePath(`/admin/inbox/${candidateId}`);
+}
+
+// Deletes the underlying scraped_articles row, which cascades (via
+// news_candidates.scraped_article_id references scraped_articles(id) on
+// delete cascade) to remove the news_candidates row too -- only one delete
+// is ever issued here, never both rows explicitly. Refuses outright once an
+// article has been published, since that news row must survive on its own.
+export async function deleteCandidateAction(candidateId: string): Promise<CandidateActionState> {
+  const supabase = await createClient();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("news_candidates")
+    .select("status, published_news_id, scraped_article_id")
+    .eq("id", candidateId)
+    .single();
+
+  if (fetchError || !existing) return { error: "This article could not be found." };
+
+  if (existing.status === "published" || existing.published_news_id) {
+    return { error: "This article has already been published and cannot be deleted here." };
+  }
+
+  const { error } = await supabase.from("scraped_articles").delete().eq("id", existing.scraped_article_id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/inbox");
+  revalidatePath(`/admin/inbox/${candidateId}`);
+  revalidatePath("/admin/review");
+  return {};
 }

@@ -64,6 +64,24 @@ export function SourceForm({
         />
       </div>
 
+      <div>
+        <label htmlFor="exclude_urls" className="mb-1 block text-sm font-medium text-foreground">
+          Skip articles from these URLs
+        </label>
+        <textarea
+          id="exclude_urls"
+          name="exclude_urls"
+          rows={3}
+          defaultValue={initial?.exclude_url_patterns?.join("\n") ?? ""}
+          placeholder={"https://www.saurenergy.com/energy-jobs"}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        />
+        <p className="mt-1 text-xs text-muted">
+          One URL or path per line. Any article whose link contains one of these will not be pulled into the
+          inbox.
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
           <label htmlFor="source_type" className="mb-1 block text-sm font-medium text-foreground">
