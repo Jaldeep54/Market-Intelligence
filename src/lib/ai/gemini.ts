@@ -16,13 +16,40 @@ import { NEWS_CATEGORIES, type NewsCategory } from "@/lib/types/database";
 // precedence over it when set.
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Hard cap enforced both in the prompt and after parsing Gemini's response --
-// Gemini is asked for <=70 words, but the limit is only real once the
-// application checks it and refuses to save anything over it.
+// Hard range enforced both in the prompt and after parsing Gemini's
+// response -- Gemini is asked for 60-70 words, but the range is only real
+// once the application checks it. Previously only the upper bound
+// (MAX_DESCRIPTION_WORDS) was checked, so a 10-word description sailed
+// through unflagged; both bounds are now checked identically.
+const MIN_DESCRIPTION_WORDS = 60;
 const MAX_DESCRIPTION_WORDS = 70;
 // One retry with explicit feedback is enough for a well-instructed model to
 // self-correct; a longer loop just burns quota for a summary nobody asked for.
 const MAX_GENERATION_ATTEMPTS = 2;
+
+function isWithinWordRange(words: number): boolean {
+  return words >= MIN_DESCRIPTION_WORDS && words <= MAX_DESCRIPTION_WORDS;
+}
+
+// Last resort after MAX_GENERATION_ATTEMPTS still misses the range: never
+// silently publish an out-of-range description. Over 70 words is truncated
+// (safe -- it only removes words, never invents any); under 60 words is
+// left as-is (padding would mean inventing content not in the source, which
+// the prompt explicitly forbids) but always flagged either way so it surfaces
+// in review instead of slipping through.
+function applyWordCountFallback(description: string, words: number): { text: string; note: string } {
+  if (words > MAX_DESCRIPTION_WORDS) {
+    const truncated = description.trim().split(/\s+/).slice(0, MAX_DESCRIPTION_WORDS).join(" ");
+    return {
+      text: truncated,
+      note: `Gemini's description was ${words} words after ${MAX_GENERATION_ATTEMPTS} attempts -- truncated to ${MAX_DESCRIPTION_WORDS} words. Please review.`,
+    };
+  }
+  return {
+    text: description,
+    note: `Gemini's description was only ${words} words after ${MAX_GENERATION_ATTEMPTS} attempts (target is ${MIN_DESCRIPTION_WORDS}-${MAX_DESCRIPTION_WORDS}). Please review and expand if needed.`,
+  };
+}
 
 export type GeminiErrorKind =
   | "missing_key"
@@ -70,6 +97,13 @@ export interface GeminiPrepareSuccess {
   ok: true;
   data: GeminiPrepareOutput;
   model: string;
+  // Set only when the word-count fallback in applyWordCountFallback() had to
+  // kick in -- the description was still out of the 60-70 word range after
+  // MAX_GENERATION_ATTEMPTS, so it was truncated/left as-is instead of
+  // blocking the prepare entirely. Persisted to news_candidates.gemini_error
+  // (see runGeminiPrepare) so it's visible in review, without needing a new
+  // column for a non-fatal notice.
+  wordCountWarning?: string;
 }
 
 export type GeminiPrepareResult = GeminiPrepareSuccess | GeminiFailure;
@@ -97,12 +131,13 @@ function fallbackNewsDate(input: GeminiPrepareInput): string {
 }
 
 // The description instruction is shared wording between this prompt and
-// buildDraftPrompt() below -- both must enforce the exact same 70-word cap.
+// buildDraftPrompt() below -- both must enforce the exact same 60-70 word
+// range, in wording and in the retry/fallback logic that checks it.
 function describeWordLimitInstruction(retryWordCount: number | null): string {
   const base =
-    'STRICT MAXIMUM of 70 words -- never exceed 70 words under any circumstances. Aim for approximately 60-70 words when the article provides enough information. Retain the most important facts, developments, companies, figures, and implications. Do not invent or add information that is not present in the source. Do not use unnecessary introductory phrases such as "This article discusses...", "According to the article...", or "The report highlights...". Write in a professional tone suitable for an internal market intelligence briefing.';
+    'The description MUST be between 60 and 70 words (inclusive) -- this is a strict requirement, not a suggestion. Never go under 60 words or over 70 words. Retain the most important facts, developments, companies, figures, and implications. Do not invent or add information that is not present in the source. Do not use unnecessary introductory phrases such as "This article discusses...", "According to the article...", or "The report highlights...". Write in a professional tone suitable for an internal market intelligence briefing.';
   if (!retryWordCount) return base;
-  return `${base} Your previous attempt was ${retryWordCount} words, which exceeds the limit -- rewrite it so it is 70 words or fewer.`;
+  return `${base} Your previous attempt was ${retryWordCount} words, which is outside the required 60-70 word range -- rewrite it so it is between 60 and 70 words.`;
 }
 
 function buildPrompt(input: GeminiPrepareInput, retryWordCount: number | null): string {
@@ -152,6 +187,11 @@ export interface GeminiDraftSuccess {
   ok: true;
   data: GeminiDraftOutput;
   model: string;
+  // See GeminiPrepareSuccess.wordCountWarning -- same fallback, but this
+  // flow has no durable "flag it" column to persist to (the admin reviews
+  // and edits this draft by hand in the Add News form before it's ever
+  // saved), so callers aren't required to surface it anywhere today.
+  wordCountWarning?: string;
 }
 
 export type GeminiDraftResult = GeminiDraftSuccess | GeminiFailure;
@@ -347,7 +387,7 @@ export async function prepareNewsWithGemini(input: GeminiPrepareInput): Promise<
   }
 
   let retryWordCount: number | null = null;
-  let lastFailure: GeminiFailure | null = null;
+  let lastAttempt: { data: z.infer<typeof geminiOutputSchema>; words: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
     const result = await callGeminiJson({
@@ -373,14 +413,10 @@ export async function prepareNewsWithGemini(input: GeminiPrepareInput): Promise<
     if (!result.ok) return result;
 
     const words = countWords(result.data.description);
-    if (words > MAX_DESCRIPTION_WORDS) {
+    lastAttempt = { data: result.data, words };
+
+    if (!isWithinWordRange(words)) {
       retryWordCount = words;
-      lastFailure = {
-        ok: false,
-        errorKind: "invalid_response",
-        message: "Gemini could not summarize this article within the 70-word limit. Please try again.",
-        model,
-      };
       continue;
     }
 
@@ -403,7 +439,29 @@ export async function prepareNewsWithGemini(input: GeminiPrepareInput): Promise<
     };
   }
 
-  return lastFailure!;
+  // Every attempt returned valid, well-formed JSON, but the description
+  // never landed in range -- fall back instead of discarding a perfectly
+  // usable title/category/date over a word count, per applyWordCountFallback.
+  const { data, words } = lastAttempt!;
+  const { text: fallbackDescription, note } = applyWordCountFallback(data.description, words);
+  const companyName = data.company_name;
+  const matchedCompany = companyName
+    ? input.companyNames.find((n) => n.toLowerCase() === companyName.toLowerCase()) ?? null
+    : null;
+
+  return {
+    ok: true,
+    model,
+    data: {
+      title: data.title,
+      description: fallbackDescription,
+      category: data.category as NewsCategory,
+      companyName: matchedCompany,
+      newsDate: data.news_date,
+      tags: data.tags,
+    },
+    wordCountWarning: note,
+  };
 }
 
 export async function generateNewsDraftFromUrl(input: GeminiDraftInput): Promise<GeminiDraftResult> {
@@ -420,7 +478,7 @@ export async function generateNewsDraftFromUrl(input: GeminiDraftInput): Promise
   }
 
   let retryWordCount: number | null = null;
-  let lastFailure: GeminiFailure | null = null;
+  let lastAttempt: { data: z.infer<typeof geminiDraftOutputSchema>; words: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
     const result = await callGeminiJson({
@@ -443,14 +501,10 @@ export async function generateNewsDraftFromUrl(input: GeminiDraftInput): Promise
     if (!result.ok) return result;
 
     const words = countWords(result.data.description);
-    if (words > MAX_DESCRIPTION_WORDS) {
+    lastAttempt = { data: result.data, words };
+
+    if (!isWithinWordRange(words)) {
       retryWordCount = words;
-      lastFailure = {
-        ok: false,
-        errorKind: "invalid_response",
-        message: "Gemini could not summarize this article within the 70-word limit. Please try again.",
-        model,
-      };
       continue;
     }
 
@@ -465,5 +519,17 @@ export async function generateNewsDraftFromUrl(input: GeminiDraftInput): Promise
     };
   }
 
-  return lastFailure!;
+  const { data, words } = lastAttempt!;
+  const { text: fallbackDescription, note } = applyWordCountFallback(data.description, words);
+
+  return {
+    ok: true,
+    model,
+    data: {
+      title: data.title,
+      description: fallbackDescription,
+      tags: data.tags,
+    },
+    wordCountWarning: note,
+  };
 }

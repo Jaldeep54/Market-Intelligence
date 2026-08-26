@@ -71,7 +71,12 @@ export async function runGeminiPrepare(
       prepared_news_date: result.data.newsDate,
       prepared_tags: result.data.tags,
       gemini_last_run_at: new Date().toISOString(),
-      gemini_error: null,
+      // Reuses gemini_error as a non-fatal notice when the word-count
+      // fallback had to kick in (see prepareNewsWithGemini) -- the
+      // description was still saved, just outside the 60-70 word target, so
+      // it's flagged here for spot-checking rather than treated as a hard
+      // failure. Cleared to null whenever a run lands cleanly in range.
+      gemini_error: result.wordCountWarning ?? null,
       status: nextStatus,
       reviewed_by: requestedBy,
       reviewed_at: new Date().toISOString(),
