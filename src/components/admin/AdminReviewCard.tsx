@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { PrepareWithGeminiButton } from "@/components/admin/PrepareWithGeminiButton";
 import { NEWS_CATEGORIES, type Company, type NewsCandidateWithArticle } from "@/lib/types/database";
 import { prepareCandidateWithGeminiAction, publishCandidateInlineAction } from "@/lib/actions/candidates";
@@ -43,6 +43,7 @@ export function AdminReviewCard({
   const [pending, startTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   // News date and tags aren't editable here -- carried over as-is from
   // whatever Gemini (or the admin, on the full Inbox review page) already
@@ -64,6 +65,22 @@ export function AdminReviewCard({
 
   const boundPrepare = prepareCandidateWithGeminiAction.bind(null, candidate.id);
   const companyName = companies.find((c) => c.id === companyId)?.name;
+
+  // Title is a <textarea> rather than an <input> specifically so it can
+  // wrap onto multiple lines instead of scrolling its content
+  // horizontally, which is what a single-line <input> always does once its
+  // value is wider than the field -- that was the actual cause of the
+  // horizontal-scroll-to-read-the-title bug on mobile, not a width/overflow
+  // rule anywhere in the surrounding layout. Auto-grows to fit however many
+  // lines the title naturally wraps to at the current screen width, rather
+  // than a fixed row count that would either clip a long title or leave
+  // empty space under a short one.
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [title]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -193,11 +210,13 @@ export function AdminReviewCard({
 
       {geminiNote && <p className="mb-2 text-xs text-amber-600">Gemini note: {geminiNote}</p>}
 
-      <input
+      <textarea
+        ref={titleRef}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         aria-label="Title"
-        className="w-full -mx-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold leading-snug text-foreground outline-none transition-colors hover:border-border focus:border-accent focus:bg-background sm:text-xl"
+        rows={1}
+        className="block w-full -mx-1 resize-none overflow-hidden break-words rounded-md border border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold leading-snug text-foreground outline-none transition-colors hover:border-border focus:border-accent focus:bg-background sm:text-xl"
       />
 
       <textarea
