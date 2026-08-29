@@ -305,10 +305,13 @@ async function callGeminiJson<T>(params: {
   zodSchema: z.ZodType<T>;
   logLabel: string;
 }): Promise<{ ok: true; data: T } | GeminiFailure> {
-  const ai = new GoogleGenAI({ apiKey: params.apiKey });
-
   let responseText: string | undefined;
   try {
+    // Constructing the client is now inside the try too -- previously it
+    // sat above this block, so any synchronous throw from it (a bad SDK
+    // build, a malformed key) would propagate straight out uncaught instead
+    // of being classified and returned like every other Gemini failure.
+    const ai = new GoogleGenAI({ apiKey: params.apiKey });
     const response = await ai.models.generateContent({
       model: params.model,
       contents: params.prompt,
