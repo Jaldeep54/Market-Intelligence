@@ -13,10 +13,6 @@ export default async function AdminReviewPage() {
     <div className="flex flex-1 flex-col gap-6">
       <div>
         <h1 className="text-lg font-semibold text-foreground">Admin News View</h1>
-        <p className="mt-1 text-sm text-muted">
-          One article at a time, newest first. Swipe left to delete, right to reject -- or use the buttons on the
-          card. Use News Inbox for bulk triage and filtering.
-        </p>
       </div>
 
       <AdminReviewList candidates={queue} companies={companies} />
