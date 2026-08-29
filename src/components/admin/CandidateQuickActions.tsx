@@ -21,14 +21,14 @@ export function CandidateQuickActions({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-sm">
       {hasPossibleDuplicate && (
         <>
           <button
             type="button"
             disabled={pending}
             onClick={() => startTransition(() => keepCandidateAction(candidateId))}
-            className="font-medium text-accent hover:underline disabled:opacity-50"
+            className="min-h-[36px] rounded-lg px-2 font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
           >
             Keep
           </button>
@@ -36,7 +36,7 @@ export function CandidateQuickActions({
             type="button"
             disabled={pending}
             onClick={() => startTransition(() => markDuplicateCandidateAction(candidateId))}
-            className="font-medium text-muted hover:underline disabled:opacity-50"
+            className="min-h-[36px] rounded-lg px-2 font-medium text-muted hover:bg-background disabled:opacity-50"
           >
             Mark Duplicate
           </button>
@@ -46,7 +46,7 @@ export function CandidateQuickActions({
         type="button"
         disabled={pending}
         onClick={() => startTransition(() => rejectCandidateAction(candidateId))}
-        className="font-medium text-danger hover:underline disabled:opacity-50"
+        className="min-h-[36px] rounded-lg px-2 font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
       >
         Reject
       </button>
@@ -57,7 +57,7 @@ export function CandidateQuickActions({
           setDeleteError(null);
           setConfirmOpen(true);
         }}
-        className="font-medium text-danger/80 underline decoration-dotted hover:text-danger disabled:opacity-50"
+        className="min-h-[36px] rounded-lg px-2 font-medium text-danger/80 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
       >
         Delete
       </button>
@@ -70,7 +70,7 @@ export function CandidateQuickActions({
           <button
             type="button"
             onClick={() => setConfirmOpen(false)}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-background"
+            className="min-h-[44px] rounded-lg border border-border px-4 text-sm text-foreground hover:bg-background"
           >
             Cancel
           </button>
@@ -87,7 +87,7 @@ export function CandidateQuickActions({
                 setConfirmOpen(false);
               })
             }
-            className="rounded-lg bg-danger px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="min-h-[44px] rounded-lg bg-danger px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {pending ? "Deleting…" : "Delete"}
           </button>

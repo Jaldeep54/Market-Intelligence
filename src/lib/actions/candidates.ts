@@ -259,26 +259,66 @@ export async function keepCandidateAction(candidateId: string) {
 // delete cascade) to remove the news_candidates row too -- only one delete
 // is ever issued here, never both rows explicitly. Refuses outright once an
 // article has been published, since that news row must survive on its own.
-export async function deleteCandidateAction(candidateId: string): Promise<CandidateActionState> {
-  const supabase = await createClient();
-
+// Shared by the single-item delete below and the bulk delete further down.
+async function deleteCandidateRow(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  candidateId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const { data: existing, error: fetchError } = await supabase
     .from("news_candidates")
     .select("status, published_news_id, scraped_article_id")
     .eq("id", candidateId)
     .single();
 
-  if (fetchError || !existing) return { error: "This article could not be found." };
+  if (fetchError || !existing) return { ok: false, error: "This article could not be found." };
 
   if (existing.status === "published" || existing.published_news_id) {
-    return { error: "This article has already been published and cannot be deleted here." };
+    return { ok: false, error: "This article has already been published and cannot be deleted here." };
   }
 
   const { error } = await supabase.from("scraped_articles").delete().eq("id", existing.scraped_article_id);
-  if (error) return { error: error.message };
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true };
+}
+
+export async function deleteCandidateAction(candidateId: string): Promise<CandidateActionState> {
+  const supabase = await createClient();
+  const result = await deleteCandidateRow(supabase, candidateId);
 
   revalidatePath("/admin/inbox");
   revalidatePath(`/admin/inbox/${candidateId}`);
   revalidatePath("/admin/review");
+
+  if (!result.ok) return { error: result.error };
   return {};
+}
+
+export interface BulkDeleteResult {
+  deletedIds: string[];
+  failed: { id: string; error: string }[];
+}
+
+// Sequential, not fanned out -- same reasoning as every other bulk loop in
+// this codebase (gentle on the database, and each row's guard check must
+// run before its own delete). Never partially fails the whole batch: every
+// id that CAN be deleted still gets deleted even if another one in the
+// selection is refused (e.g. already published).
+export async function deleteCandidatesAction(candidateIds: string[]): Promise<BulkDeleteResult> {
+  const supabase = await createClient();
+  const deletedIds: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+
+  for (const candidateId of candidateIds) {
+    const result = await deleteCandidateRow(supabase, candidateId);
+    if (result.ok) {
+      deletedIds.push(candidateId);
+    } else {
+      failed.push({ id: candidateId, error: result.error });
+    }
+  }
+
+  revalidatePath("/admin/inbox");
+  revalidatePath("/admin/review");
+  return { deletedIds, failed };
 }

@@ -146,8 +146,8 @@ export function AdminReviewCard({
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            rows={6}
+            className="w-full min-h-[9rem] resize-y rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </div>
 
@@ -229,7 +229,7 @@ export function AdminReviewCard({
           <button
             type="button"
             onClick={() => setConfirmDeleteOpen(false)}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-background"
+            className="min-h-[44px] rounded-lg border border-border px-4 text-sm text-foreground hover:bg-background"
           >
             Cancel
           </button>
@@ -237,7 +237,7 @@ export function AdminReviewCard({
             type="button"
             disabled={pending}
             onClick={handleDelete}
-            className="rounded-lg bg-danger px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="min-h-[44px] rounded-lg bg-danger px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {pending ? "Deleting…" : "Delete"}
           </button>

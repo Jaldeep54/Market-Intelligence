@@ -47,7 +47,7 @@ export function CandidateReviewForm({
           name="title"
           required
           defaultValue={candidate.prepared_title ?? candidate.article.original_title}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
 
@@ -62,10 +62,10 @@ export function CandidateReviewForm({
           id="description"
           name="description"
           required
-          rows={5}
+          rows={6}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          className="w-full min-h-[9rem] resize-y rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
 
@@ -79,7 +79,7 @@ export function CandidateReviewForm({
             name="category"
             required
             defaultValue={initialCategory}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           >
             <option value="" disabled>
               Select category
@@ -101,7 +101,7 @@ export function CandidateReviewForm({
             id="company_id"
             name="company_id"
             defaultValue={initialCompanyId}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           >
             <option value="">— None —</option>
             {companies.map((c) => (
@@ -124,7 +124,7 @@ export function CandidateReviewForm({
             type="date"
             required
             defaultValue={initialNewsDate}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </div>
 
@@ -137,14 +137,14 @@ export function CandidateReviewForm({
             name="tags"
             defaultValue={candidate.prepared_tags.join(", ")}
             placeholder="policy, exports, capacity"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </div>
       </div>
 
       <div>
         <span className="mb-1 block text-sm font-medium text-foreground">Source URL</span>
-        <p className="truncate rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted">
+        <p className="break-all rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted">
           {sourceUrl}
         </p>
       </div>
@@ -157,7 +157,7 @@ export function CandidateReviewForm({
           name="intent"
           value="save"
           disabled={pending}
-          className="rounded-lg border border-border px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:opacity-50"
+          className="min-h-[44px] flex-1 rounded-lg border border-border px-5 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:opacity-50 sm:flex-none"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -166,7 +166,7 @@ export function CandidateReviewForm({
           name="intent"
           value="publish"
           disabled={pending}
-          className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="min-h-[44px] flex-1 rounded-lg bg-accent px-5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50 sm:flex-none"
         >
           {pending ? "Publishing…" : "Approve & Publish"}
         </button>
