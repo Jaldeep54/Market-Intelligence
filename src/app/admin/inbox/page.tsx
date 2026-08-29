@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getInboxCandidates, getInboxCounts } from "@/lib/data/candidates";
 import { getSources } from "@/lib/data/sources";
 import { CANDIDATE_STATUSES, RELEVANCE_LABELS, type CandidateStatus, type RelevanceLabel } from "@/lib/types/database";
-import { InboxTable } from "@/components/admin/InboxTable";
+import { InboxList } from "@/components/admin/InboxList";
 
 const COUNTER_LABELS: { key: keyof Awaited<ReturnType<typeof getInboxCounts>>; label: string }[] = [
   { key: "new", label: "New" },
@@ -57,7 +57,7 @@ export default async function AdminInboxPage({
       </div>
 
       <form method="GET" className="flex flex-wrap items-end gap-3">
-        <div>
+        <div className="w-full sm:w-auto">
           <label htmlFor="status" className="mb-1 block text-xs font-medium text-muted">
             Status
           </label>
@@ -65,7 +65,7 @@ export default async function AdminInboxPage({
             id="status"
             name="status"
             defaultValue={status ?? ""}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:w-auto"
           >
             <option value="">All</option>
             {CANDIDATE_STATUSES.map((s) => (
@@ -75,7 +75,7 @@ export default async function AdminInboxPage({
             ))}
           </select>
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <label htmlFor="relevance" className="mb-1 block text-xs font-medium text-muted">
             Relevance
           </label>
@@ -83,7 +83,7 @@ export default async function AdminInboxPage({
             id="relevance"
             name="relevance"
             defaultValue={relevance ?? ""}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:w-auto"
           >
             <option value="">All</option>
             {RELEVANCE_LABELS.map((r) => (
@@ -93,7 +93,7 @@ export default async function AdminInboxPage({
             ))}
           </select>
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <label htmlFor="source" className="mb-1 block text-xs font-medium text-muted">
             Source
           </label>
@@ -101,7 +101,7 @@ export default async function AdminInboxPage({
             id="source"
             name="source"
             defaultValue={sourceId ?? ""}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:w-auto"
           >
             <option value="">All</option>
             {sources.map((s) => (
@@ -111,7 +111,7 @@ export default async function AdminInboxPage({
             ))}
           </select>
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <label htmlFor="dateFrom" className="mb-1 block text-xs font-medium text-muted">
             From date
           </label>
@@ -120,10 +120,10 @@ export default async function AdminInboxPage({
             name="dateFrom"
             type="date"
             defaultValue={dateFrom ?? ""}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:w-auto"
           />
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <label htmlFor="dateTo" className="mb-1 block text-xs font-medium text-muted">
             To date
           </label>
@@ -132,18 +132,18 @@ export default async function AdminInboxPage({
             name="dateTo"
             type="date"
             defaultValue={dateTo ?? ""}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[44px] rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:w-auto"
           />
         </div>
         <button
           type="submit"
-          className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-background"
+          className="min-h-[44px] w-full rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-background sm:w-auto"
         >
           Filter
         </button>
       </form>
 
-      <InboxTable candidates={candidates} />
+      <InboxList candidates={candidates} />
     </div>
   );
 }

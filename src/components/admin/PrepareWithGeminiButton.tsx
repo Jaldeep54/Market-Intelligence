@@ -36,7 +36,7 @@ export function PrepareWithGeminiButton({
             }
           })
         }
-        className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        className="min-h-[44px] rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
       >
         {pending ? "Preparing…" : label}
       </button>
