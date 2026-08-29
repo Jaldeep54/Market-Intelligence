@@ -8,7 +8,6 @@ import { newsSchema, parseTagsInput } from "@/lib/validation/news";
 import { syncTags } from "@/lib/utils/tags";
 import { extractArticleText } from "@/lib/utils/extractArticleText";
 import { generateNewsDraftFromUrl } from "@/lib/ai/gemini";
-import type { NewsCategory } from "@/lib/types/database";
 
 export interface NewsFormState {
   error?: string;
@@ -57,32 +56,6 @@ export async function generateNewsDraftAction(sourceUrl: string): Promise<Genera
       tags: result.data.tags,
     },
   };
-}
-
-// "Generate with Gemini" from the Admin News card (card-based review, not
-// the Add News form): reuses generateNewsDraftAction's extraction+Gemini
-// call as-is -- no second Gemini integration -- but since this acts on an
-// article that already exists (not a not-yet-created draft sitting in a
-// form), there's no separate "review before saving" step here: a fresh
-// draft is generated and persisted directly, and the caller updates its own
-// display from the returned data.
-export async function regenerateNewsContentAction(id: string, sourceUrl: string): Promise<GenerateNewsDraftState> {
-  const result = await generateNewsDraftAction(sourceUrl);
-  if (result.error || !result.data) return result;
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("news")
-    .update({ title: result.data.title, description: result.data.description })
-    .eq("id", id);
-
-  if (error) return { error: error.message };
-
-  await syncTags(supabase, id, result.data.tags);
-
-  revalidatePath("/admin/news");
-  revalidatePath("/");
-  return result;
 }
 
 function readNewsForm(formData: FormData) {
@@ -171,9 +144,8 @@ export async function updateNewsAction(
   redirect("/admin/news");
 }
 
-// Returns {error?} rather than void so the Admin News card's swipe-to-delete
-// can tell a real failure apart from success and restore the card instead
-// of leaving it removed -- existing callers (via ConfirmDeleteButton) don't
+// Returns {error?} rather than void so callers can tell a real failure
+// apart from success -- existing callers (via ConfirmDeleteButton) don't
 // read the resolved value, so this is a non-breaking widening.
 export async function deleteNewsAction(id: string): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -185,28 +157,9 @@ export async function deleteNewsAction(id: string): Promise<{ error?: string }> 
   return {};
 }
 
-// Also used directly for "Reject" (published: false) and "Publish"
-// (published: true) on the Admin News card -- the `news` table has no
-// separate rejection/status column, so this existing toggle already is the
-// most appropriate mechanism (see src/lib/types/database.ts NewsRow).
 export async function toggleNewsPublishedAction(id: string, nextPublished: boolean): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { error } = await supabase.from("news").update({ published: nextPublished }).eq("id", id);
-  if (error) return { error: error.message };
-
-  revalidatePath("/admin/news");
-  revalidatePath("/");
-  return {};
-}
-
-// Category-only update for the Admin News card's three-dot menu -- reuses
-// NEWS_CATEGORIES/NewsCategory (no duplicate category definition) and the
-// same `news` table update pattern as updateNewsAction, just scoped to one
-// field so the card doesn't need to resubmit the entire article to change
-// its category.
-export async function updateNewsCategoryAction(id: string, category: NewsCategory): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("news").update({ category }).eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/admin/news");

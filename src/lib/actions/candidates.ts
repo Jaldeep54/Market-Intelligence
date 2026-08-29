@@ -228,12 +228,19 @@ async function performPublish(candidateId: string, formData: FormData): Promise<
   return {};
 }
 
-export async function rejectCandidateAction(candidateId: string) {
+// Returns {error?} rather than void so the Admin News View's swipe-to-reject
+// can tell a real failure apart from success and restore the card instead
+// of leaving it removed. Existing callers (AdminReviewCard's Reject button,
+// CandidateQuickActions) don't read the resolved value, so this is a
+// non-breaking widening.
+export async function rejectCandidateAction(candidateId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
-  await supabase.from("news_candidates").update({ status: "rejected" }).eq("id", candidateId);
+  const { error } = await supabase.from("news_candidates").update({ status: "rejected" }).eq("id", candidateId);
   revalidatePath("/admin/inbox");
   revalidatePath(`/admin/inbox/${candidateId}`);
   revalidatePath("/admin/review");
+  if (error) return { error: error.message };
+  return {};
 }
 
 export async function markDuplicateCandidateAction(candidateId: string) {
