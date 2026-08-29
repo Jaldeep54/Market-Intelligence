@@ -2,8 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { Modal } from "@/components/shared/Modal";
+import { PrepareWithGeminiButton } from "@/components/admin/PrepareWithGeminiButton";
 import { NEWS_CATEGORIES, type Company, type NewsCandidateWithArticle } from "@/lib/types/database";
-import { deleteCandidateAction, publishCandidateInlineAction, rejectCandidateAction } from "@/lib/actions/candidates";
+import {
+  deleteCandidateAction,
+  prepareCandidateWithGeminiAction,
+  publishCandidateInlineAction,
+  rejectCandidateAction,
+} from "@/lib/actions/candidates";
 
 function toDateInputValue(value: string | null): string {
   if (!value) return new Date().toISOString().slice(0, 10);
@@ -31,8 +37,23 @@ export function AdminReviewCard({
 
   // News date and tags aren't editable here to keep the card focused for
   // mobile review -- carried over as-is from whatever Gemini (or the admin,
-  // on the full Inbox review page) already prepared.
-  const newsDate = toDateInputValue(candidate.prepared_news_date ?? candidate.article.published_at);
+  // on the full Inbox review page) already prepared. Kept in state (not
+  // just read from `candidate`) so a Gemini run can update them too.
+  const [newsDate, setNewsDate] = useState(toDateInputValue(candidate.prepared_news_date ?? candidate.article.published_at));
+  const [tags, setTags] = useState(candidate.prepared_tags);
+
+  // Tracks whether a Gemini run has produced content for this card, so the
+  // button switches from "Generate" to "Regenerate" the moment a run
+  // succeeds -- without this it would only flip after a full page reload,
+  // since `candidate` itself never changes for an already-mounted card.
+  const [hasGenerated, setHasGenerated] = useState(Boolean(candidate.prepared_title));
+  // Any gemini_error already on this candidate from a prior run (e.g. left
+  // over from before a page reload). Cleared the moment a fresh run
+  // succeeds; a fresh run that fails instead shows its own error right next
+  // to the button below, via PrepareWithGeminiButton's built-in display.
+  const [geminiNote, setGeminiNote] = useState(candidate.gemini_error);
+
+  const boundPrepare = prepareCandidateWithGeminiAction.bind(null, candidate.id);
 
   function handlePublish() {
     setError(null);
@@ -43,7 +64,7 @@ export function AdminReviewCard({
       formData.set("category", category);
       formData.set("company_id", companyId);
       formData.set("news_date", newsDate);
-      formData.set("tags", candidate.prepared_tags.join(", "));
+      formData.set("tags", tags.join(", "));
 
       const result = await publishCandidateInlineAction(candidate.id, formData);
       if (result.error) {
@@ -90,14 +111,25 @@ export function AdminReviewCard({
         </a>
       </div>
 
-      {!candidate.prepared_title ? (
-        <p className="mt-2 text-xs text-amber-600">
-          Not yet prepared by Gemini -- showing the original scraped title/description below.
-          {candidate.gemini_error ? ` Last attempt: ${candidate.gemini_error}` : ""}
-        </p>
-      ) : (
-        candidate.gemini_error && <p className="mt-2 text-xs text-amber-600">Gemini note: {candidate.gemini_error}</p>
-      )}
+      {geminiNote && <p className="mt-2 text-xs text-amber-600">Gemini note: {geminiNote}</p>}
+
+      <div className="mt-3">
+        <PrepareWithGeminiButton
+          action={boundPrepare}
+          label={hasGenerated ? "Regenerate with Gemini" : "Generate with Gemini"}
+          disabled={pending}
+          onSuccess={(data) => {
+            setTitle(data.title);
+            setDescription(data.description);
+            setCategory(data.category);
+            setCompanyId(data.companyId ?? "");
+            setNewsDate(data.newsDate);
+            setTags(data.tags);
+            setHasGenerated(true);
+            setGeminiNote(null);
+          }}
+        />
+      </div>
 
       <div className="mt-3 space-y-3">
         <div>

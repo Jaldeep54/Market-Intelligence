@@ -5,20 +5,25 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCandidateById } from "@/lib/data/candidates";
 import { getCompanies } from "@/lib/data/companies";
-import { runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
+import { recordGeminiCrash, runGeminiPrepare, type GeminiCompanyLookup, type GeminiPrepareOutcome } from "@/lib/automation/candidatePrepare";
 import { readCandidatePrepForm } from "@/lib/validation/candidates";
 import { syncTags } from "@/lib/utils/tags";
 
 export interface CandidateActionState {
   error?: string;
+  // Set on a successful "Prepare with Gemini" / "Generate with Gemini" run
+  // so callers (AdminReviewCard) can update their own fields directly from
+  // the return value instead of waiting on revalidatePath -- a client
+  // component's local state doesn't automatically re-sync from a
+  // revalidated server prop once it's already mounted.
+  data?: GeminiPrepareOutcome;
 }
 
-// "Prepare with Gemini" -- runs only when the admin clicks it (spec section
-// 18). Every attempt is logged to ai_processing_logs regardless of outcome.
-// Shares its Gemini-call-and-persist logic with the automatic prepare that
-// runs at ingestion time in fetchOneSource (src/lib/automation/fetchSources.ts)
-// via runGeminiPrepare -- this action just supplies the admin's user id as
-// `requestedBy` where the automatic path passes null.
+// "Prepare with Gemini" -- runs only when the admin clicks it, either on
+// the News Inbox review page ("Prepare"/"Regenerate with Gemini") or on an
+// Admin News View card ("Generate"/"Regenerate with Gemini"). Every attempt
+// is logged to ai_processing_logs regardless of outcome. Fetching never
+// calls this -- see src/lib/automation/candidatePrepare.ts.
 export async function prepareCandidateWithGeminiAction(candidateId: string): Promise<CandidateActionState> {
   const supabase = await createClient();
   const candidate = await getCandidateById(supabase, candidateId);
@@ -32,28 +37,37 @@ export async function prepareCandidateWithGeminiAction(candidateId: string): Pro
 
   const { data: userData } = await supabase.auth.getUser();
 
-  const result = await runGeminiPrepare(
-    supabase,
-    candidateId,
-    {
-      sourceName: candidate.article.source_name,
-      originalTitle: candidate.article.original_title,
-      originalDescription: candidate.article.original_description,
-      rawContent: candidate.article.raw_content,
-      publishedAt: candidate.article.published_at,
-      sourceUrl: candidate.article.original_url,
-    },
-    lookup,
-    userData.user?.id ?? null,
-    candidate.status
-  );
+  let result: Awaited<ReturnType<typeof runGeminiPrepare>>;
+  try {
+    result = await runGeminiPrepare(
+      supabase,
+      candidateId,
+      {
+        sourceName: candidate.article.source_name,
+        originalTitle: candidate.article.original_title,
+        originalDescription: candidate.article.original_description,
+        rawContent: candidate.article.raw_content,
+        publishedAt: candidate.article.published_at,
+        sourceUrl: candidate.article.original_url,
+      },
+      lookup,
+      userData.user?.id ?? null,
+      candidate.status
+    );
+  } catch (err) {
+    await recordGeminiCrash(supabase, candidateId, err);
+    revalidatePath(`/admin/inbox/${candidateId}`);
+    revalidatePath("/admin/inbox");
+    revalidatePath("/admin/review");
+    return { error: err instanceof Error ? err.message : "Gemini crashed unexpectedly. Please try again." };
+  }
 
   revalidatePath(`/admin/inbox/${candidateId}`);
   revalidatePath("/admin/inbox");
   revalidatePath("/admin/review");
 
   if (!result.ok) return { error: result.error };
-  return {};
+  return { data: result.data };
 }
 
 // One form drives both buttons ("Save" and "Approve & Publish"): each

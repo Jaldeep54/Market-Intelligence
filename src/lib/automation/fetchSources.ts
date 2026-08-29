@@ -3,7 +3,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchFeed } from "@/lib/automation/feed";
 import { canonicalizeUrl, contentHash, titleSimilarity, POSSIBLE_DUPLICATE_THRESHOLD } from "@/lib/automation/duplicate";
 import { scoreRelevance } from "@/lib/automation/relevance";
-import { recordGeminiCrash, runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
 import type { AutomationBatchTrigger, NewsSource } from "@/lib/types/database";
 
 export interface SourceFetchSummary {
@@ -29,7 +28,10 @@ export interface BatchFetchSummary {
   perSource: SourceFetchSummary[];
 }
 
-type CompanyLookup = GeminiCompanyLookup;
+interface CompanyLookup {
+  companyNames: string[];
+  companyIdByName: Map<string, string>;
+}
 
 async function loadCompanyLookup(supabase: SupabaseClient): Promise<CompanyLookup> {
   const { data: companies } = await supabase.from("companies").select("id,name");
@@ -161,68 +163,23 @@ async function fetchOneSource(
       ? lookup.companyIdByName.get(relevance.matchedCompanyName.toLowerCase()) ?? null
       : null;
 
-    const candidateStatus = relevance.label === "needs_review" ? "needs_review" : "new";
-
-    const { data: candidateRow } = await supabase
-      .from("news_candidates")
-      .insert({
-        scraped_article_id: articleRow.id,
-        source_id: source.id,
-        status: candidateStatus,
-        relevance_label: relevance.label,
-        relevance_score: relevance.score,
-        suggested_category: source.default_category,
-        suggested_company_id: suggestedCompanyId,
-        possible_duplicate_of: possibleDuplicateOf,
-        duplicate_note: possibleDuplicateOf
-          ? "A recently discovered article has a very similar title -- this may be the same story."
-          : null,
-      })
-      .select("id")
-      .single();
-
-    // Auto-prepare with Gemini right at ingestion so the Admin News View has
-    // a ready-to-publish title/description without a manual click. Awaited
-    // sequentially (never fanned out) to respect Gemini rate limits, same as
-    // every other per-source step in this loop. Every brand-new candidate
-    // has prepared_title/reviewed_by unset by construction, satisfying the
-    // "never overwrite a human edit" rule without an extra guard query.
-    if (candidateRow) {
-      // Wrapped so a thrown exception here (a serverless timeout killing
-      // the request mid-call, an SDK constructor throwing, any bug) can't
-      // silently abort the rest of this source's articles with zero trace
-      // -- previously an uncaught throw here propagated all the way out of
-      // this for-loop, leaving this candidate (and every article after it
-      // in this batch) with no prepared_title AND no ai_processing_logs
-      // row at all, indistinguishable from auto-prepare never running.
-      try {
-        await runGeminiPrepare(
-          supabase,
-          candidateRow.id,
-          {
-            sourceName: source.source_name,
-            originalTitle: item.title,
-            originalDescription: description,
-            rawContent: item.contentEncoded ?? null,
-            publishedAt: item.publishedAt,
-            sourceUrl: item.link,
-          },
-          lookup,
-          null,
-          candidateStatus
-        );
-      } catch (err) {
-        await recordGeminiCrash(supabase, candidateRow.id, err);
-      }
-    } else {
-      // Never silent: if the insert-then-read-back above didn't return a
-      // row (RLS, a transient error, anything), auto-prepare is skipped
-      // entirely -- log it so that failure mode shows up in Vercel's logs
-      // instead of just looking like "Gemini never ran" with no trace.
-      console.error(
-        `[fetchOneSource] news_candidates insert for scraped_article ${articleRow.id} did not return a row -- skipped Gemini auto-prepare.`
-      );
-    }
+    // Fetching only discovers and stores articles -- Gemini never runs here.
+    // An admin triggers it explicitly, per article, from "Generate with
+    // Gemini" on /admin/review or "Prepare with Gemini" on
+    // /admin/inbox/[id] (see src/lib/actions/candidates.ts).
+    await supabase.from("news_candidates").insert({
+      scraped_article_id: articleRow.id,
+      source_id: source.id,
+      status: relevance.label === "needs_review" ? "needs_review" : "new",
+      relevance_label: relevance.label,
+      relevance_score: relevance.score,
+      suggested_category: source.default_category,
+      suggested_company_id: suggestedCompanyId,
+      possible_duplicate_of: possibleDuplicateOf,
+      duplicate_note: possibleDuplicateOf
+        ? "A recently discovered article has a very similar title -- this may be the same story."
+        : null,
+    });
 
     newArticles++;
   }
