@@ -1,21 +1,29 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { Modal } from "@/components/shared/Modal";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { PrepareWithGeminiButton } from "@/components/admin/PrepareWithGeminiButton";
 import { NEWS_CATEGORIES, type Company, type NewsCandidateWithArticle } from "@/lib/types/database";
-import {
-  deleteCandidateAction,
-  prepareCandidateWithGeminiAction,
-  publishCandidateInlineAction,
-  rejectCandidateAction,
-} from "@/lib/actions/candidates";
+import { prepareCandidateWithGeminiAction, publishCandidateInlineAction } from "@/lib/actions/candidates";
 
 function toDateInputValue(value: string | null): string {
   if (!value) return new Date().toISOString().slice(0, 10);
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
+function formatDate(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// Reject and Delete are swipe-only now (see AdminReviewList) -- this card is
+// content-first: a category chip + the ⋮ menu at top, the title and
+// description doing almost all of the work, and a slim metadata row at the
+// bottom. Title/Description stay editable (unchanged functionality, just
+// restyled to read like article text rather than a form) so Gemini output
+// can still be tweaked before publishing.
 export function AdminReviewCard({
   candidate,
   companies,
@@ -32,28 +40,41 @@ export function AdminReviewCard({
   const [category, setCategory] = useState(candidate.prepared_category ?? candidate.suggested_category ?? "");
   const [companyId, setCompanyId] = useState(candidate.prepared_company_id ?? candidate.suggested_company_id ?? "");
   const [error, setError] = useState<string | null>(null);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // News date and tags aren't editable here to keep the card focused for
-  // mobile review -- carried over as-is from whatever Gemini (or the admin,
-  // on the full Inbox review page) already prepared. Kept in state (not
-  // just read from `candidate`) so a Gemini run can update them too.
+  // News date and tags aren't editable here -- carried over as-is from
+  // whatever Gemini (or the admin, on the full Inbox review page) already
+  // prepared. Kept in state (not just read from `candidate`) so a Gemini
+  // run can update them too.
   const [newsDate, setNewsDate] = useState(toDateInputValue(candidate.prepared_news_date ?? candidate.article.published_at));
   const [tags, setTags] = useState(candidate.prepared_tags);
 
   // Tracks whether a Gemini run has produced content for this card, so the
-  // button switches from "Generate" to "Regenerate" the moment a run
+  // menu item switches from "Generate" to "Regenerate" the moment a run
   // succeeds -- without this it would only flip after a full page reload,
   // since `candidate` itself never changes for an already-mounted card.
   const [hasGenerated, setHasGenerated] = useState(Boolean(candidate.prepared_title));
   // Any gemini_error already on this candidate from a prior run (e.g. left
   // over from before a page reload). Cleared the moment a fresh run
   // succeeds; a fresh run that fails instead shows its own error right next
-  // to the button below, via PrepareWithGeminiButton's built-in display.
+  // to the menu's Gemini button, via PrepareWithGeminiButton's own display.
   const [geminiNote, setGeminiNote] = useState(candidate.gemini_error);
 
   const boundPrepare = prepareCandidateWithGeminiAction.bind(null, candidate.id);
+  const companyName = companies.find((c) => c.id === companyId)?.name;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
 
   function handlePublish() {
     setError(null);
@@ -71,178 +92,143 @@ export function AdminReviewCard({
         setError(result.error);
         return;
       }
-      onRemove(candidate.id);
-    });
-  }
-
-  function handleReject() {
-    setError(null);
-    startTransition(async () => {
-      await rejectCandidateAction(candidate.id);
-      onRemove(candidate.id);
-    });
-  }
-
-  function handleDelete() {
-    setError(null);
-    startTransition(async () => {
-      const result = await deleteCandidateAction(candidate.id);
-      if (result.error) {
-        setError(result.error);
-        setConfirmDeleteOpen(false);
-        return;
-      }
-      setConfirmDeleteOpen(false);
+      setMenuOpen(false);
       onRemove(candidate.id);
     });
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-        <span>{candidate.source_name ?? "Unknown source"}</span>
-        <a
-          href={candidate.article.original_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-medium text-accent hover:underline"
-        >
-          Open Source ↗
-        </a>
-      </div>
+    <div className="rounded-xl border border-border bg-surface p-4 sm:p-6">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <span className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+          {category || "Uncategorized"}
+        </span>
 
-      {geminiNote && <p className="mt-2 text-xs text-amber-600">Gemini note: {geminiNote}</p>}
+        <div className="relative shrink-0" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="flex h-11 w-11 items-center justify-center rounded-full text-xl leading-none text-muted transition-colors hover:bg-background hover:text-foreground"
+          >
+            ⋮
+          </button>
 
-      <div className="mt-3">
-        <PrepareWithGeminiButton
-          action={boundPrepare}
-          label={hasGenerated ? "Regenerate with Gemini" : "Generate with Gemini"}
-          disabled={pending}
-          onSuccess={(data) => {
-            setTitle(data.title);
-            setDescription(data.description);
-            setCategory(data.category);
-            setCompanyId(data.companyId ?? "");
-            setNewsDate(data.newsDate);
-            setTags(data.tags);
-            setHasGenerated(true);
-            setGeminiNote(null);
-          }}
-        />
-      </div>
-
-      <div className="mt-3 space-y-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Title</label>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={6}
-            className="w-full min-h-[9rem] resize-y rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Category</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 z-10 mt-1 w-64 rounded-xl border border-border bg-surface p-2 text-sm shadow-lg"
             >
-              <option value="" disabled>
-                Select category
-              </option>
-              {NEWS_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="px-1 pb-1">
+                <PrepareWithGeminiButton
+                  action={boundPrepare}
+                  label={hasGenerated ? "Regenerate with Gemini" : "Generate with Gemini"}
+                  disabled={pending}
+                  onSuccess={(data) => {
+                    setTitle(data.title);
+                    setDescription(data.description);
+                    setCategory(data.category);
+                    setCompanyId(data.companyId ?? "");
+                    setNewsDate(data.newsDate);
+                    setTags(data.tags);
+                    setHasGenerated(true);
+                    setGeminiNote(null);
+                  }}
+                />
+              </div>
 
-          {category === "Top Company News" && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted">
-                Company <span className="font-normal">(required for Top Company News)</span>
-              </label>
-              <select
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              <button
+                type="button"
+                role="menuitem"
+                disabled={pending}
+                onClick={handlePublish}
+                className="block min-h-[44px] w-full rounded-lg px-3 text-left text-foreground hover:bg-background disabled:opacity-50"
               >
-                <option value="">— None —</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+                {pending ? "Publishing…" : "Publish"}
+              </button>
+
+              <div className="mt-1 px-3 py-2">
+                <label className="mb-1 block text-xs font-medium text-muted">Category</label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                >
+                  <option value="" disabled>
+                    Select category
                   </option>
-                ))}
-              </select>
+                  {NEWS_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {category === "Top Company News" && (
+                <div className="px-3 py-2">
+                  <label className="mb-1 block text-xs font-medium text-muted">
+                    Company <span className="font-normal">(required for Top Company News)</span>
+                  </label>
+                  <select
+                    value={companyId}
+                    onChange={(e) => setCompanyId(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                  >
+                    <option value="">— None —</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
+      {geminiNote && <p className="mb-2 text-xs text-amber-600">Gemini note: {geminiNote}</p>}
+
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        aria-label="Title"
+        className="w-full -mx-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold leading-snug text-foreground outline-none transition-colors hover:border-border focus:border-accent focus:bg-background sm:text-xl"
+      />
+
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        aria-label="Description"
+        rows={9}
+        className="mt-3 min-h-[15rem] w-full -mx-1 resize-y rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm leading-relaxed text-foreground/90 outline-none transition-colors hover:border-border focus:border-accent focus:bg-background"
+      />
+
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={handlePublish}
-          className="min-h-[44px] flex-1 rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {pending ? "Working…" : "Publish"}
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={handleReject}
-          className="min-h-[44px] flex-1 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:opacity-50"
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => setConfirmDeleteOpen(true)}
-          className="min-h-[44px] flex-1 rounded-lg border border-danger/40 px-4 text-sm font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
-        >
-          Delete
-        </button>
-      </div>
-
-      <Modal open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)} title="Confirm deletion">
-        <p className="text-sm text-foreground/90">
-          Delete this article from the inbox? This removes the scraped article entirely and cannot be undone.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setConfirmDeleteOpen(false)}
-            className="min-h-[44px] rounded-lg border border-border px-4 text-sm text-foreground hover:bg-background"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={handleDelete}
-            className="min-h-[44px] rounded-lg bg-danger px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {pending ? "Deleting…" : "Delete"}
-          </button>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-2">
+          {tags.map((tag) => (
+            <span key={tag} className="rounded-full border border-border px-2 py-1">
+              #{tag}
+            </span>
+          ))}
+          {companyName && <span className="rounded-full border border-border px-2 py-1">{companyName}</span>}
+          <span>{formatDate(newsDate)}</span>
         </div>
-      </Modal>
+        <a
+          href={candidate.article.original_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-full bg-accent px-3 py-1.5 font-medium text-accent-foreground transition-opacity hover:opacity-90"
+        >
+          Source ↗
+        </a>
+      </div>
     </div>
   );
 }
