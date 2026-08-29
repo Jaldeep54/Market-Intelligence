@@ -10,12 +10,12 @@ export default async function AdminReviewPage() {
   const queue = candidates.filter((c) => c.status !== "published" && c.status !== "rejected");
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-1 flex-col gap-6">
       <div>
         <h1 className="text-lg font-semibold text-foreground">Admin News View</h1>
         <p className="mt-1 text-sm text-muted">
-          Mobile-friendly review queue, newest first. Publish, reject, or delete straight from each card -- use
-          News Inbox for bulk triage and filtering.
+          One article at a time, newest first. Swipe left to delete, right to reject -- or use the buttons on the
+          card. Use News Inbox for bulk triage and filtering.
         </p>
       </div>
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getAdminNewsList } from "@/lib/data/news";
 import { NEWS_CATEGORIES, type NewsCategory } from "@/lib/types/database";
-import { AdminNewsFeed } from "@/components/admin/AdminNewsFeed";
+import { NewsTable } from "@/components/admin/NewsTable";
 
 export default async function AdminNewsListPage({
   searchParams,
@@ -21,7 +21,7 @@ export default async function AdminNewsListPage({
   const news = await getAdminNewsList(supabase, { search, category, status });
 
   return (
-    <div className="flex flex-1 flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-foreground">News Management</h1>
         <Link
@@ -86,7 +86,7 @@ export default async function AdminNewsListPage({
         </button>
       </form>
 
-      <AdminNewsFeed key={JSON.stringify({ search, category, status })} items={news} />
+      <NewsTable items={news} />
     </div>
   );
 }

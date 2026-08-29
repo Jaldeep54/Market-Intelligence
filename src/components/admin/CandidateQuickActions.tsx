@@ -45,7 +45,11 @@ export function CandidateQuickActions({
       <button
         type="button"
         disabled={pending}
-        onClick={() => startTransition(() => rejectCandidateAction(candidateId))}
+        onClick={() =>
+          startTransition(async () => {
+            await rejectCandidateAction(candidateId);
+          })
+        }
         className="min-h-[36px] rounded-lg px-2 font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
       >
         Reject
