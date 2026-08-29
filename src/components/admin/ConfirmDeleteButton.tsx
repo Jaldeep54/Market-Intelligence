@@ -7,7 +7,7 @@ export function ConfirmDeleteButton({
   action,
   itemLabel,
 }: {
-  action: () => Promise<void>;
+  action: () => Promise<void | { error?: string }>;
   itemLabel: string;
 }) {
   const [open, setOpen] = useState(false);
