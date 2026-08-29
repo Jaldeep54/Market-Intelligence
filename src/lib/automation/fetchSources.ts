@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchFeed } from "@/lib/automation/feed";
 import { canonicalizeUrl, contentHash, titleSimilarity, POSSIBLE_DUPLICATE_THRESHOLD } from "@/lib/automation/duplicate";
 import { scoreRelevance } from "@/lib/automation/relevance";
-import { runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
+import { recordGeminiCrash, runGeminiPrepare, type GeminiCompanyLookup } from "@/lib/automation/candidatePrepare";
 import type { AutomationBatchTrigger, NewsSource } from "@/lib/types/database";
 
 export interface SourceFetchSummary {
@@ -188,21 +188,32 @@ async function fetchOneSource(
     // has prepared_title/reviewed_by unset by construction, satisfying the
     // "never overwrite a human edit" rule without an extra guard query.
     if (candidateRow) {
-      await runGeminiPrepare(
-        supabase,
-        candidateRow.id,
-        {
-          sourceName: source.source_name,
-          originalTitle: item.title,
-          originalDescription: description,
-          rawContent: item.contentEncoded ?? null,
-          publishedAt: item.publishedAt,
-          sourceUrl: item.link,
-        },
-        lookup,
-        null,
-        candidateStatus
-      );
+      // Wrapped so a thrown exception here (a serverless timeout killing
+      // the request mid-call, an SDK constructor throwing, any bug) can't
+      // silently abort the rest of this source's articles with zero trace
+      // -- previously an uncaught throw here propagated all the way out of
+      // this for-loop, leaving this candidate (and every article after it
+      // in this batch) with no prepared_title AND no ai_processing_logs
+      // row at all, indistinguishable from auto-prepare never running.
+      try {
+        await runGeminiPrepare(
+          supabase,
+          candidateRow.id,
+          {
+            sourceName: source.source_name,
+            originalTitle: item.title,
+            originalDescription: description,
+            rawContent: item.contentEncoded ?? null,
+            publishedAt: item.publishedAt,
+            sourceUrl: item.link,
+          },
+          lookup,
+          null,
+          candidateStatus
+        );
+      } catch (err) {
+        await recordGeminiCrash(supabase, candidateRow.id, err);
+      }
     } else {
       // Never silent: if the insert-then-read-back above didn't return a
       // row (RLS, a transient error, anything), auto-prepare is skipped
@@ -317,5 +328,23 @@ export async function fetchSingleSource(
 
   const batchId = randomUUID();
   const lookup = await loadCompanyLookup(supabase);
-  return fetchOneSource(supabase, source as NewsSource, batchId, trigger, lookup);
+
+  // Unlike fetchAllActiveSources's per-source loop, this single-source path
+  // previously had no top-level catch at all -- an uncaught throw from
+  // anywhere in fetchOneSource would propagate straight out of the "Fetch
+  // Now" server action instead of coming back as a normal failed summary.
+  try {
+    return await fetchOneSource(supabase, source as NewsSource, batchId, trigger, lookup);
+  } catch (err) {
+    return {
+      sourceId,
+      sourceName: source.source_name,
+      ok: false,
+      articlesFound: 0,
+      newArticles: 0,
+      duplicates: 0,
+      skipped: 0,
+      error: err instanceof Error ? err.message : "Unexpected error while checking this source.",
+    };
+  }
 }

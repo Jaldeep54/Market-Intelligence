@@ -860,6 +860,30 @@ async function runGeminiPrepare(
     .eq("id", candidateId);
 }
 
+// Mirrors recordGeminiCrash() in src/lib/automation/candidatePrepare.ts.
+// Called from fetchOneSource's own try/catch around runGeminiPrepare -- a
+// thrown exception previously meant the whole per-source loop aborted with
+// NO ai_processing_logs row and no gemini_error at all, indistinguishable
+// from auto-prepare never having been triggered.
+async function recordGeminiCrash(supabase: SupabaseClient, candidateId: string, err: unknown): Promise<void> {
+  const message =
+    err instanceof Error
+      ? `Auto-prepare crashed before completing: ${err.message}`
+      : "Auto-prepare crashed before completing (unexpected error).";
+
+  console.error(`[runGeminiPrepare] threw for candidate ${candidateId}:`, err);
+
+  await supabase.from("ai_processing_logs").insert({
+    candidate_id: candidateId,
+    model: "unknown",
+    status: "error",
+    error_message: message,
+    requested_by: null,
+  });
+
+  await supabase.from("news_candidates").update({ gemini_error: message }).eq("id", candidateId);
+}
+
 // ---------------------------------------------------------------------------
 // Orchestration: per-source fetch, canonical-URL dedupe, relevance scoring,
 // possible-duplicate flagging, automation_runs logging. Same behavior as
@@ -1055,21 +1079,27 @@ async function fetchOneSource(
     // error to ai_processing_logs per candidate rather than silently
     // skipping, exactly like the Node path behaves without that env var.
     if (candidateRow) {
-      await runGeminiPrepare(
-        supabase,
-        candidateRow.id,
-        {
-          sourceName: source.source_name,
-          originalTitle: item.title,
-          originalDescription: description,
-          rawContent: item.contentEncoded ?? null,
-          publishedAt: item.publishedAt,
-          sourceUrl: item.link,
-        },
-        lookup,
-        null,
-        candidateStatus
-      );
+      // Wrapped so a thrown exception here can't silently abort the rest of
+      // this source's articles with zero trace (see recordGeminiCrash).
+      try {
+        await runGeminiPrepare(
+          supabase,
+          candidateRow.id,
+          {
+            sourceName: source.source_name,
+            originalTitle: item.title,
+            originalDescription: description,
+            rawContent: item.contentEncoded ?? null,
+            publishedAt: item.publishedAt,
+            sourceUrl: item.link,
+          },
+          lookup,
+          null,
+          candidateStatus
+        );
+      } catch (err) {
+        await recordGeminiCrash(supabase, candidateRow.id, err);
+      }
     } else {
       // Never silent: if the insert-then-read-back above didn't return a
       // row, auto-prepare is skipped entirely -- log it so that failure
