@@ -2,13 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { prepareNewsWithGemini } from "@/lib/ai/gemini";
 import type { CandidateStatus } from "@/lib/types/database";
 
-// Shared by the manual "Prepare with Gemini" action (src/lib/actions/candidates.ts)
-// and the automatic prepare-at-ingestion call in fetchOneSource
-// (src/lib/automation/fetchSources.ts), so both paths log to
-// ai_processing_logs and persist prepared_* fields identically -- the only
-// difference between them is `requestedBy` (an admin's user id for the
-// manual path, null for automatic runs) and where the article/company data
-// comes from.
+// Used by the manual "Prepare with Gemini" / "Generate with Gemini" action
+// (src/lib/actions/candidates.ts, called from both the News Inbox review
+// page and the Admin News View cards) -- Gemini only ever runs when an
+// admin clicks a button. Fetching (src/lib/automation/fetchSources.ts and
+// supabase/functions/fetch-sources/index.ts) never calls this; it only
+// discovers and stores articles.
 
 export interface CandidateArticleInfo {
   sourceName: string;
@@ -24,6 +23,15 @@ export interface GeminiCompanyLookup {
   companyIdByName: Map<string, string>;
 }
 
+export interface GeminiPrepareOutcome {
+  title: string;
+  description: string;
+  category: string;
+  companyId: string | null;
+  newsDate: string;
+  tags: string[];
+}
+
 export async function runGeminiPrepare(
   supabase: SupabaseClient,
   candidateId: string,
@@ -31,7 +39,7 @@ export async function runGeminiPrepare(
   lookup: GeminiCompanyLookup,
   requestedBy: string | null,
   currentStatus: CandidateStatus
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: true; data: GeminiPrepareOutcome } | { ok: false; error: string }> {
   const result = await prepareNewsWithGemini({
     sourceName: article.sourceName,
     originalTitle: article.originalTitle,
@@ -83,22 +91,29 @@ export async function runGeminiPrepare(
     })
     .eq("id", candidateId);
 
-  return { ok: true };
+  return {
+    ok: true,
+    data: {
+      title: result.data.title,
+      description: result.data.description,
+      category: result.data.category,
+      companyId: matchedCompanyId,
+      newsDate: result.data.newsDate,
+      tags: result.data.tags,
+    },
+  };
 }
 
-// Called from fetchOneSource's own try/catch around runGeminiPrepare -- a
-// thrown exception (network blip, an SDK constructor throwing, the host
-// process being killed mid-call by a serverless timeout) previously meant
-// the whole per-source loop aborted with NO ai_processing_logs row and no
-// gemini_error at all: prepared_title stayed null with zero trace of why,
-// indistinguishable from auto-prepare never having been triggered. This
-// guarantees every candidate that reaches an attempt ends up with a visible
-// record one way or another.
+// Called from prepareCandidateWithGeminiAction's own try/catch around
+// runGeminiPrepare -- a thrown exception previously meant the calling
+// Server Action itself threw uncaught, surfacing as a generic error instead
+// of the clean {error} response the UI expects, with no ai_processing_logs
+// row or gemini_error to explain what happened.
 export async function recordGeminiCrash(supabase: SupabaseClient, candidateId: string, err: unknown): Promise<void> {
   const message =
     err instanceof Error
-      ? `Auto-prepare crashed before completing: ${err.message}`
-      : "Auto-prepare crashed before completing (unexpected error).";
+      ? `Gemini crashed before completing: ${err.message}`
+      : "Gemini crashed before completing (unexpected error).";
 
   console.error(`[runGeminiPrepare] threw for candidate ${candidateId}:`, err);
 
