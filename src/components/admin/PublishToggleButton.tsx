@@ -6,7 +6,7 @@ export function PublishToggleButton({
   action,
   published,
 }: {
-  action: () => Promise<void>;
+  action: () => Promise<void | { error?: string }>;
   published: boolean;
 }) {
   const [pending, startTransition] = useTransition();
@@ -15,7 +15,11 @@ export function PublishToggleButton({
     <button
       type="button"
       disabled={pending}
-      onClick={() => startTransition(action)}
+      onClick={() =>
+        startTransition(async () => {
+          await action();
+        })
+      }
       className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
         published
           ? "bg-accent/10 text-accent hover:bg-accent/20"
