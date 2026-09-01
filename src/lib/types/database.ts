@@ -263,6 +263,99 @@ export interface AiProcessingLog {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Price Trends: normalized weekly solar-market pricing (Polysilicon, Wafer,
+// Cell, Module, Glass). One product + one week = one weekly_prices row.
+// ---------------------------------------------------------------------------
+
+export type PriceCategorySlug = "polysilicon" | "wafer" | "cell" | "module" | "glass";
+
+export type Currency = "RMB" | "USD" | "INR";
+export const CURRENCIES: Currency[] = ["RMB", "USD", "INR"];
+
+export interface PriceCategory {
+  id: string;
+  name: string;
+  slug: string;
+  unit: string;
+  has_landing_price: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export interface PriceProduct {
+  id: string;
+  category_id: string;
+  name: string;
+  slug: string;
+  display_order: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PriceWeek {
+  id: string;
+  year: number;
+  week_number: number;
+  price_date: string;
+  rmb_to_usd: number;
+  rmb_to_inr: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// landing_* / india_landing_inr are null for Polysilicon/Module/Glass rows,
+// and a permanent snapshot (never recalculated with later inputs) for
+// Wafer/Cell rows -- see the weekly_prices table comment in the migration.
+export interface WeeklyPrice {
+  id: string;
+  week_id: string;
+  product_id: string;
+  base_price_rmb: number;
+  china_fob_usd: number;
+  china_fob_inr: number;
+  landing_freight: number | null;
+  landing_insurance_pct: number | null;
+  landing_duty_pct: number | null;
+  landing_port_cha: number | null;
+  landing_inland: number | null;
+  india_landing_inr: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Per-product landing-cost inputs as edited on the admin "Add Weekly Price"
+// form -- shape mirrors the landing_* snapshot columns above minus the ids.
+export interface LandingInputs {
+  freight: number;
+  insurance_pct: number;
+  duty_pct: number;
+  port_cha: number;
+  inland: number;
+}
+
+export interface WeeklyPriceWithWeek extends WeeklyPrice {
+  week: PriceWeek;
+}
+
+export interface PriceProductWithLatest extends PriceProduct {
+  latest: WeeklyPriceWithWeek | null;
+  previous: WeeklyPriceWithWeek | null;
+}
+
+export interface PriceCategoryWithProducts extends PriceCategory {
+  products: PriceProductWithLatest[];
+}
+
+// One product's full price history, joined with each week's date for
+// charting (X = week/date, Y = selected currency + unit).
+export interface ProductPriceHistory {
+  product: PriceProduct;
+  category: PriceCategory;
+  history: WeeklyPriceWithWeek[];
+}
+
 export const NOT_DISCLOSED = "Not publicly disclosed";
 
 export function displayOrNotDisclosed(value: string | null | undefined): string {
