@@ -13,6 +13,7 @@ const ITEMS = [
   { label: "News Sources", href: "/admin/sources" },
   { label: "Automation", href: "/admin/automation" },
   { label: "Company Management", href: "/admin/companies" },
+  { label: "Price Trends", href: "/admin/prices" },
   { label: "Users", href: "/admin/users" },
 ];
 

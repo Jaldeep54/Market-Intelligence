@@ -56,6 +56,17 @@ export function NavBar({ companies }: { companies: Company[] }) {
             Top Company Profiles
           </Link>
 
+          <Link
+            href="/prices"
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              pathname.startsWith("/prices")
+                ? "bg-accent text-accent-foreground"
+                : "text-muted hover:bg-background hover:text-foreground"
+            }`}
+          >
+            Price Trends
+          </Link>
+
           <button
             type="button"
             onClick={() => setFiltersOpen(true)}
