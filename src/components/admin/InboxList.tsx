@@ -22,7 +22,7 @@ const STATUS_STYLES: Record<string, string> = {
   needs_review: "bg-amber-500/10 text-amber-600",
   prepared: "bg-accent/10 text-accent",
   approved: "bg-accent/10 text-accent",
-  published: "bg-border/60 text-muted",
+  published: "bg-accent text-accent-foreground",
   rejected: "bg-danger/10 text-danger",
   duplicate: "bg-border/60 text-muted",
 };
@@ -100,6 +100,32 @@ export function InboxList({ candidates }: { candidates: NewsCandidateWithArticle
     });
   }
 
+  // Per-row actions from CandidateQuickActions: applied to local state the
+  // moment the server action resolves successfully, same as handleBulkDelete
+  // above, instead of waiting on revalidatePath to refresh this already-
+  // mounted component's `candidates` prop.
+  function handleRowDeleted(id: string) {
+    setItems((prev) => prev.filter((c) => c.id !== id));
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  function handleRowRejected(id: string) {
+    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, status: "rejected" } : c)));
+  }
+
+  function handleRowMarkedDuplicate(id: string) {
+    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, status: "duplicate" } : c)));
+  }
+
+  function handleRowKept(id: string) {
+    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, possible_duplicate: null } : c)));
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -132,7 +158,12 @@ export function InboxList({ candidates }: { candidates: NewsCandidateWithArticle
       {/* Mobile: stacked cards, one column, no horizontal scroll. */}
       <div className="flex flex-col gap-3 md:hidden">
         {items.map((candidate) => (
-          <div key={candidate.id} className="rounded-xl border border-border bg-surface p-4">
+          <div
+            key={candidate.id}
+            className={`rounded-xl border border-border bg-surface p-4 ${
+              candidate.status === "published" ? "border-l-4 border-l-accent bg-accent/5" : ""
+            }`}
+          >
             <div className="flex items-start gap-3">
               {isSelectable(candidate) && (
                 <input
@@ -187,6 +218,10 @@ export function InboxList({ candidates }: { candidates: NewsCandidateWithArticle
                 <CandidateQuickActions
                   candidateId={candidate.id}
                   hasPossibleDuplicate={Boolean(candidate.possible_duplicate)}
+                  onDeleted={handleRowDeleted}
+                  onRejected={handleRowRejected}
+                  onMarkedDuplicate={handleRowMarkedDuplicate}
+                  onKept={handleRowKept}
                 />
               </div>
             )}
@@ -211,7 +246,12 @@ export function InboxList({ candidates }: { candidates: NewsCandidateWithArticle
           </thead>
           <tbody>
             {items.map((candidate) => (
-              <tr key={candidate.id} className="border-b border-border align-top last:border-b-0">
+              <tr
+                key={candidate.id}
+                className={`border-b border-border align-top last:border-b-0 ${
+                  candidate.status === "published" ? "border-l-2 border-l-accent bg-accent/5" : ""
+                }`}
+              >
                 <td className="px-4 py-3">
                   {isSelectable(candidate) && (
                     <input
@@ -266,6 +306,10 @@ export function InboxList({ candidates }: { candidates: NewsCandidateWithArticle
                       <CandidateQuickActions
                         candidateId={candidate.id}
                         hasPossibleDuplicate={Boolean(candidate.possible_duplicate)}
+                        onDeleted={handleRowDeleted}
+                        onRejected={handleRowRejected}
+                        onMarkedDuplicate={handleRowMarkedDuplicate}
+                        onKept={handleRowKept}
                       />
                     )}
                   </div>
