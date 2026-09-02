@@ -30,19 +30,20 @@ const EDGE_BUFFER_PX = 4;
 type Direction = "next" | "prev";
 
 // A two-sided "paper roll" -- both the outgoing and incoming item rotate
-// around the leading edge (top for "next", bottom for "prev") at the same
+// around the leading edge (left for "next", right for "prev") at the same
 // time, so it reads as one sheet rolling away while the next rolls into
-// place rather than a plain slide/fade.
+// place rather than a plain slide/fade. Horizontal (rotateY/scaleX) to match
+// the left/right swipe gesture that triggers it.
 const rollVariants: Variants = {
   initial: (dir: Direction) => ({
-    rotateX: dir === "next" ? -78 : 78,
-    scaleY: 0.45,
+    rotateY: dir === "next" ? -78 : 78,
+    scaleX: 0.45,
     opacity: 0,
   }),
-  animate: { rotateX: 0, scaleY: 1, opacity: 1 },
+  animate: { rotateY: 0, scaleX: 1, opacity: 1 },
   exit: (dir: Direction) => ({
-    rotateX: dir === "next" ? 78 : -78,
-    scaleY: 0.45,
+    rotateY: dir === "next" ? 78 : -78,
+    scaleX: 0.45,
     opacity: 0,
   }),
 };
@@ -73,6 +74,7 @@ function isAtBottom(el: HTMLElement | null): boolean {
 export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: SwipeStageProps<T>) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<Direction>("next");
+  const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const wheelLocked = useRef(false);
   // Ref to the scrollable element of whichever item is currently on stage --
@@ -180,21 +182,31 @@ export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: Swip
   }
 
   function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
+    touchStartX.current = e.touches[0]?.clientX ?? null;
     touchStartY.current = e.touches[0]?.clientY ?? null;
   }
 
+  // Horizontal swipe pages (left = next, right = prev), vertical touch
+  // movement only ever scrolls the article -- never pages. Unlike the wheel
+  // handler, a horizontal swipe isn't gated on scroll position: it's a
+  // distinct gesture from vertical reading scroll, so it can page from
+  // anywhere in the article.
   function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
-    if (touchStartY.current === null) return;
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const endX = e.changedTouches[0]?.clientX ?? touchStartX.current;
     const endY = e.changedTouches[0]?.clientY ?? touchStartY.current;
-    const delta = touchStartY.current - endY;
+    const deltaX = touchStartX.current - endX;
+    const deltaY = touchStartY.current - endY;
+    touchStartX.current = null;
     touchStartY.current = null;
-    if (Math.abs(delta) < SWIPE_THRESHOLD_PX) return;
 
-    const el = scrollRef.current;
-    if (delta > 0) {
-      if (isAtBottom(el)) goNext();
+    if (Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX) return;
+
+    if (deltaX > 0) {
+      goNext();
     } else {
-      if (isAtTop(el)) goPrev();
+      goPrev();
     }
   }
 
@@ -243,7 +255,7 @@ export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: Swip
             exit="exit"
             transition={reducedMotion ? FADE_TRANSITION : ROLL_TRANSITION}
             style={{
-              transformOrigin: direction === "next" ? "top center" : "bottom center",
+              transformOrigin: direction === "next" ? "left center" : "right center",
             }}
             ref={(el: HTMLDivElement | null) => {
               // Only assign on mount -- see the scrollRef comment above.
