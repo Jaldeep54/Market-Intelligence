@@ -9,7 +9,7 @@ export function CompanyProfileCard({
   company: Company & { capacity: CompanyCapacity | null };
 }) {
   return (
-    <article className="flex max-h-full flex-col overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8">
+    <article className="flex flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8">
       <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
         {company.name}
       </h2>
