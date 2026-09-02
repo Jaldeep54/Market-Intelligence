@@ -10,7 +10,7 @@ function formatDate(dateStr: string): string {
 
 export function NewsCard({ news }: { news: NewsWithRelations }) {
   return (
-    <article className="flex max-h-full flex-col overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8">
+    <article className="flex flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8">
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-accent">
         <span className="rounded-full bg-accent/10 px-2.5 py-1">{news.category}</span>
         {news.company && (
