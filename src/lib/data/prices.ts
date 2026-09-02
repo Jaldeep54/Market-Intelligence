@@ -64,13 +64,22 @@ export async function getPriceCategoriesWithLatest(
   }));
 }
 
+// NOTE on ordering: `price_weeks` is joined here as a to-one embed (each
+// weekly_prices row has exactly one week). PostgREST's `.order(col, {
+// referencedTable })` only reorders rows *within* a one-to-many embedded
+// array -- it has no effect on the ordering of the *outer* query's rows, so
+// it can never be used to sort weekly_prices by its joined week's date.
+// Every function below fetches unordered and sorts explicitly in JS using
+// each row's own `week.price_date` instead.
+function sortByWeekDate<T extends { week: { price_date: string } }>(rows: T[], direction: "asc" | "desc"): T[] {
+  const sorted = [...rows].sort((a, b) => a.week.price_date.localeCompare(b.week.price_date));
+  return direction === "desc" ? sorted.reverse() : sorted;
+}
+
 async function getAllWeeklyPricesWithWeek(supabase: SupabaseClient): Promise<WeeklyPriceWithWeek[]> {
-  const { data, error } = await supabase
-    .from("weekly_prices")
-    .select("*, week:price_weeks(*)")
-    .order("price_date", { ascending: false, referencedTable: "price_weeks" });
+  const { data, error } = await supabase.from("weekly_prices").select("*, week:price_weeks(*)");
   if (error) throw error;
-  return (data ?? []) as unknown as WeeklyPriceWithWeek[];
+  return sortByWeekDate((data ?? []) as unknown as WeeklyPriceWithWeek[], "desc");
 }
 
 export async function getProductPriceHistory(
@@ -96,14 +105,13 @@ export async function getProductPriceHistory(
   const { data: history, error: historyError } = await supabase
     .from("weekly_prices")
     .select("*, week:price_weeks(*)")
-    .eq("product_id", product.id)
-    .order("price_date", { ascending: true, referencedTable: "price_weeks" });
+    .eq("product_id", product.id);
   if (historyError) throw historyError;
 
   return {
     product: product as PriceProduct,
     category: category as PriceCategory,
-    history: (history ?? []) as unknown as WeeklyPriceWithWeek[],
+    history: sortByWeekDate((history ?? []) as unknown as WeeklyPriceWithWeek[], "asc"),
   };
 }
 
@@ -131,12 +139,11 @@ export async function getCategoryHistories(
   const { data: allHistory, error: historyError } = await supabase
     .from("weekly_prices")
     .select("*, week:price_weeks(*)")
-    .in("product_id", (products ?? []).map((p) => p.id))
-    .order("price_date", { ascending: true, referencedTable: "price_weeks" });
+    .in("product_id", (products ?? []).map((p) => p.id));
   if (historyError) throw historyError;
 
   const byProduct = new Map<string, WeeklyPriceWithWeek[]>();
-  for (const row of (allHistory ?? []) as unknown as WeeklyPriceWithWeek[]) {
+  for (const row of sortByWeekDate((allHistory ?? []) as unknown as WeeklyPriceWithWeek[], "asc")) {
     const list = byProduct.get(row.product_id) ?? [];
     list.push(row);
     byProduct.set(row.product_id, list);
@@ -240,15 +247,31 @@ export async function getLatestLandingInputsByProduct(
 
   const { data, error } = await supabase
     .from("weekly_prices")
-    .select("product_id, landing_freight, landing_insurance_pct, landing_duty_pct, landing_port_cha, landing_inland, week:price_weeks(price_date)")
+    .select(
+      "product_id, landing_freight, landing_insurance_pct, landing_duty_pct, landing_port_cha, landing_inland, week:price_weeks(price_date)"
+    )
     .in("product_id", productIds)
-    .not("landing_freight", "is", null)
-    .order("price_date", { ascending: false, referencedTable: "price_weeks" });
+    .not("landing_freight", "is", null);
   if (error) throw error;
 
+  // Picks the row with the greatest price_date per product directly, rather
+  // than relying on query order (see the sortByWeekDate comment above --
+  // `.order(col, { referencedTable })` cannot sort this outer query).
+  const latestDateByProduct = new Map<string, string>();
   const map = new Map<string, LandingInputs>();
-  for (const row of data ?? []) {
-    if (map.has(row.product_id)) continue;
+  for (const row of (data ?? []) as unknown as {
+    product_id: string;
+    landing_freight: number;
+    landing_insurance_pct: number;
+    landing_duty_pct: number;
+    landing_port_cha: number;
+    landing_inland: number;
+    week: { price_date: string };
+  }[]) {
+    const currentLatest = latestDateByProduct.get(row.product_id);
+    if (currentLatest && currentLatest >= row.week.price_date) continue;
+
+    latestDateByProduct.set(row.product_id, row.week.price_date);
     map.set(row.product_id, {
       freight: Number(row.landing_freight),
       insurance_pct: Number(row.landing_insurance_pct),
