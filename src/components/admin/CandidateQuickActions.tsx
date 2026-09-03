@@ -12,9 +12,20 @@ import { Modal } from "@/components/shared/Modal";
 export function CandidateQuickActions({
   candidateId,
   hasPossibleDuplicate,
+  onDeleted,
+  onRejected,
+  onKept,
+  onMarkedDuplicate,
 }: {
   candidateId: string;
   hasPossibleDuplicate: boolean;
+  // Called after each action's server call resolves successfully, so the
+  // caller (InboxList) can update its local list immediately instead of
+  // waiting on revalidatePath to refresh the already-mounted list.
+  onDeleted?: (candidateId: string) => void;
+  onRejected?: (candidateId: string) => void;
+  onKept?: (candidateId: string) => void;
+  onMarkedDuplicate?: (candidateId: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -27,7 +38,12 @@ export function CandidateQuickActions({
           <button
             type="button"
             disabled={pending}
-            onClick={() => startTransition(() => keepCandidateAction(candidateId))}
+            onClick={() =>
+              startTransition(async () => {
+                await keepCandidateAction(candidateId);
+                onKept?.(candidateId);
+              })
+            }
             className="min-h-[36px] rounded-lg px-2 font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
           >
             Keep
@@ -35,7 +51,12 @@ export function CandidateQuickActions({
           <button
             type="button"
             disabled={pending}
-            onClick={() => startTransition(() => markDuplicateCandidateAction(candidateId))}
+            onClick={() =>
+              startTransition(async () => {
+                await markDuplicateCandidateAction(candidateId);
+                onMarkedDuplicate?.(candidateId);
+              })
+            }
             className="min-h-[36px] rounded-lg px-2 font-medium text-muted hover:bg-background disabled:opacity-50"
           >
             Mark Duplicate
@@ -47,7 +68,8 @@ export function CandidateQuickActions({
         disabled={pending}
         onClick={() =>
           startTransition(async () => {
-            await rejectCandidateAction(candidateId);
+            const result = await rejectCandidateAction(candidateId);
+            if (!result.error) onRejected?.(candidateId);
           })
         }
         className="min-h-[36px] rounded-lg px-2 font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
@@ -89,6 +111,7 @@ export function CandidateQuickActions({
                   return;
                 }
                 setConfirmOpen(false);
+                onDeleted?.(candidateId);
               })
             }
             className="min-h-[44px] rounded-lg bg-danger px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
