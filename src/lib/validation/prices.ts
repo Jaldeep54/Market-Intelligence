@@ -25,6 +25,8 @@ export const landingInputsSchema = z.object({
 
 export const basePriceSchema = nonNegativeSchema;
 
+export const productNameSchema = z.string().trim().min(1, "Product name is required");
+
 export function parseNumberField(formData: FormData, key: string): number | null {
   const raw = formData.get(key);
   if (raw === null || String(raw).trim() === "") return null;

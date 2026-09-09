@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
-import { saveWeeklyPricesAction, type PriceFormState } from "@/lib/actions/prices";
+import { useActionState, useMemo, useState, useTransition } from "react";
+import { addPriceProductAction, saveWeeklyPricesAction, type PriceFormState } from "@/lib/actions/prices";
 import { calculateLandingInr, toChinaFobInr, toChinaFobUsd } from "@/lib/utils/priceCalculations";
 import type { LandingInputs, PriceCategory, PriceProduct, WeeklyPriceWithWeek } from "@/lib/types/database";
 
@@ -30,6 +30,68 @@ const inputClass =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent";
 const labelClass = "mb-1 block text-xs font-medium text-muted";
 
+// Lets the admin add a new product to a category inline, without leaving the
+// form or losing prices already typed for other products. Local-only state
+// (name/error/pending) -- success is reported to the parent via `onAdded`,
+// which is what actually makes the new product show up in the category list.
+function AddProductRow({ categoryId, onAdded }: { categoryId: string; onAdded: (product: PriceProduct) => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function submit() {
+    const trimmed = name.trim();
+    if (!trimmed || pending) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await addPriceProductAction(categoryId, trimmed);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (result.product) {
+        onAdded(result.product);
+        setName("");
+      }
+    });
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-border p-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[12rem] flex-1">
+          <label className={labelClass} htmlFor={`new-product-${categoryId}`}>
+            New product name
+          </label>
+          <input
+            id={`new-product-${categoryId}`}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="e.g. M10 Mono PERC"
+            className={inputClass}
+          />
+        </div>
+        <button
+          type="button"
+          disabled={pending || !name.trim()}
+          onClick={submit}
+          className="min-h-[40px] rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-opacity hover:bg-background disabled:opacity-50"
+        >
+          {pending ? "Adding…" : "+ Add Product"}
+        </button>
+      </div>
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
 export function PriceWeekForm({
   categories,
   defaultLandingInputs,
@@ -43,6 +105,26 @@ export function PriceWeekForm({
 }) {
   const boundAction = saveWeeklyPricesAction.bind(null, editingWeek?.id ?? null);
   const [state, formAction, pending] = useActionState<PriceFormState, FormData>(boundAction, {});
+
+  // Products added mid-session via "+ Add Product", keyed by category id --
+  // merged into `categories` below so a newly added product immediately
+  // renders with an empty price input (and landing inputs, if applicable)
+  // alongside the products seeded via migration, in both new-week and
+  // edit-week mode. Never mutates the props passed in.
+  const [addedProducts, setAddedProducts] = useState<Record<string, PriceProduct[]>>({});
+
+  const categoriesWithAdded = useMemo(
+    () =>
+      categories.map((category) => ({
+        ...category,
+        products: [...category.products, ...(addedProducts[category.id] ?? [])],
+      })),
+    [categories, addedProducts]
+  );
+
+  function handleProductAdded(categoryId: string, product: PriceProduct) {
+    setAddedProducts((prev) => ({ ...prev, [categoryId]: [...(prev[categoryId] ?? []), product] }));
+  }
 
   const [weekNumber, setWeekNumber] = useState(String(editingWeek?.week_number ?? ""));
   const [priceDate, setPriceDate] = useState(editingWeek?.price_date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
@@ -92,7 +174,7 @@ export function PriceWeekForm({
 
   const preview = useMemo(() => {
     const result: Record<string, { fobUsd: number; fobInr: number; landingInr?: number }> = {};
-    for (const category of categories) {
+    for (const category of categoriesWithAdded) {
       for (const product of category.products) {
         const base = n(basePrices[product.id] ?? "");
         const fobUsd = toChinaFobUsd(base, rates.usd);
@@ -110,7 +192,7 @@ export function PriceWeekForm({
       }
     }
     return result;
-  }, [categories, basePrices, landingInputs, rates.usd, rates.inr]);
+  }, [categoriesWithAdded, basePrices, landingInputs, rates.usd, rates.inr]);
 
   function updateLanding(productId: string, field: keyof LandingInputs, value: string) {
     setLandingInputs((prev) => ({
@@ -192,7 +274,7 @@ export function PriceWeekForm({
         </div>
       </section>
 
-      {categories.map((category) => (
+      {categoriesWithAdded.map((category) => (
         <section key={category.id} className="rounded-xl border border-border bg-surface p-5">
           <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted">{category.name}</h2>
           <p className="mb-4 text-xs text-muted">China FOB price in {category.unit}</p>
@@ -296,6 +378,7 @@ export function PriceWeekForm({
                 </div>
               );
             })}
+            <AddProductRow categoryId={category.id} onAdded={(product) => handleProductAdded(category.id, product)} />
           </div>
         </section>
       ))}
