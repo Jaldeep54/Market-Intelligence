@@ -4,11 +4,88 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPriceCategories, getPriceProducts } from "@/lib/data/prices";
-import { basePriceSchema, landingInputsSchema, parseNumberField, weekHeaderSchema } from "@/lib/validation/prices";
+import {
+  basePriceSchema,
+  landingInputsSchema,
+  parseNumberField,
+  productNameSchema,
+  weekHeaderSchema,
+} from "@/lib/validation/prices";
 import { calculateLandingInr, toChinaFobInr, toChinaFobUsd } from "@/lib/utils/priceCalculations";
+import type { PriceProduct } from "@/lib/types/database";
 
 export interface PriceFormState {
   error?: string;
+}
+
+export interface AddPriceProductState extends PriceFormState {
+  product?: PriceProduct;
+}
+
+function slugifyProductName(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "product"
+  );
+}
+
+// Lets an admin add a new product line item to a category (e.g. a new Wafer
+// spec) the moment its price is first published, instead of requiring a
+// migration. The slug is derived from the name and de-duplicated within the
+// category (matching the (category_id, slug) unique constraint); the name
+// itself is also rejected case-insensitively within the category so two
+// products can't differ only by spelling/casing. display_order simply
+// appends after every existing product in the category -- past weeks are
+// unaffected since weekly_prices rows are keyed on (week_id, product_id) and
+// this only ever inserts a new product, never touches existing rows.
+export async function addPriceProductAction(categoryId: string, name: string): Promise<AddPriceProductState> {
+  const parsed = productNameSchema.safeParse(name);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Product name is required" };
+  }
+  const trimmedName = parsed.data;
+
+  const supabase = await createClient();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("price_products")
+    .select("name, slug, display_order")
+    .eq("category_id", categoryId);
+  if (fetchError) return { error: fetchError.message };
+
+  const existingProducts = existing ?? [];
+  const isDuplicateName = existingProducts.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase());
+  if (isDuplicateName) {
+    return { error: `"${trimmedName}" already exists in this category.` };
+  }
+
+  const baseSlug = slugifyProductName(trimmedName);
+  const existingSlugs = new Set(existingProducts.map((p) => p.slug));
+  let slug = baseSlug;
+  let suffix = 2;
+  while (existingSlugs.has(slug)) {
+    slug = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+
+  const nextDisplayOrder = existingProducts.reduce((max, p) => Math.max(max, p.display_order), 0) + 1;
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("price_products")
+    .insert({ category_id: categoryId, name: trimmedName, slug, display_order: nextDisplayOrder, active: true })
+    .select("*")
+    .single();
+  if (insertError || !inserted) return { error: insertError?.message ?? "Could not add the product." };
+
+  revalidatePath("/admin/prices/new");
+  revalidatePath("/admin/prices/[weekId]/edit", "page");
+  revalidatePath("/admin/prices");
+  revalidatePath("/prices");
+
+  return { product: inserted as PriceProduct };
 }
 
 // Handles both creating a brand-new week and editing an existing one --
