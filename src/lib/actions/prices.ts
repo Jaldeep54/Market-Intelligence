@@ -78,7 +78,17 @@ export async function addPriceProductAction(categoryId: string, name: string): P
     .insert({ category_id: categoryId, name: trimmedName, slug, display_order: nextDisplayOrder, active: true })
     .select("*")
     .single();
-  if (insertError || !inserted) return { error: insertError?.message ?? "Could not add the product." };
+  if (insertError) {
+    // A concurrent submission (e.g. a double-fired click) can race past the
+    // isDuplicateName check above; the (category_id, slug) unique constraint
+    // is the real backstop, so a 23505 here still means "duplicate name" to
+    // the admin, not a raw DB error.
+    if (insertError.code === "23505") {
+      return { error: `"${trimmedName}" already exists in this category.` };
+    }
+    return { error: insertError.message };
+  }
+  if (!inserted) return { error: "Could not add the product." };
 
   revalidatePath("/admin/prices/new");
   revalidatePath("/admin/prices/[weekId]/edit", "page");
@@ -86,6 +96,40 @@ export async function addPriceProductAction(categoryId: string, name: string): P
   revalidatePath("/prices");
 
   return { product: inserted as PriceProduct };
+}
+
+// Tells the remove-product confirmation dialog whether this product already
+// carries saved weekly prices, so the admin sees an explicit warning before
+// hiding one that has real historical data attached, instead of a generic
+// prompt. Deliberately just one cheap existence check (limit 1) -- no need
+// for a count or anything heavier here.
+export async function productHasHistoryAction(productId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("weekly_prices").select("id").eq("product_id", productId).limit(1);
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+}
+
+// Soft delete only: price_products.id is referenced by historical
+// weekly_prices rows, and this codebase never alters or loses a past week's
+// data, so this flips `active` to false and nothing else -- it never deletes
+// the row or touches weekly_prices. getPriceProducts() already filters on
+// active = true, so a deactivated product simply stops appearing on the "Add
+// Weekly Price" form (and everywhere else that lists active products) and
+// is excluded from all future weeks, while its saved history keeps
+// rendering wherever it's looked up directly by product_id (edit-week view,
+// product history pages).
+export async function deactivatePriceProductAction(productId: string): Promise<PriceFormState> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("price_products").update({ active: false }).eq("id", productId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/prices/new");
+  revalidatePath("/admin/prices/[weekId]/edit", "page");
+  revalidatePath("/admin/prices");
+  revalidatePath("/prices");
+
+  return {};
 }
 
 // Handles both creating a brand-new week and editing an existing one --

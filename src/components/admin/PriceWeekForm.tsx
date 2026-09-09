@@ -1,7 +1,13 @@
 "use client";
 
-import { useActionState, useMemo, useState, useTransition } from "react";
-import { addPriceProductAction, saveWeeklyPricesAction, type PriceFormState } from "@/lib/actions/prices";
+import { useActionState, useMemo, useRef, useState, useTransition } from "react";
+import {
+  addPriceProductAction,
+  deactivatePriceProductAction,
+  productHasHistoryAction,
+  saveWeeklyPricesAction,
+  type PriceFormState,
+} from "@/lib/actions/prices";
 import { calculateLandingInr, toChinaFobInr, toChinaFobUsd } from "@/lib/utils/priceCalculations";
 import type { LandingInputs, PriceCategory, PriceProduct, WeeklyPriceWithWeek } from "@/lib/types/database";
 
@@ -34,24 +40,35 @@ const labelClass = "mb-1 block text-xs font-medium text-muted";
 // form or losing prices already typed for other products. Local-only state
 // (name/error/pending) -- success is reported to the parent via `onAdded`,
 // which is what actually makes the new product show up in the category list.
+//
+// submittingRef is a synchronous guard against a click firing this twice: a
+// `useTransition` `pending` flag is state, so it can lag a tick behind a
+// fast second click/Enter combo, but a plain ref is set/read immediately
+// with no render in between, so it can never miss an overlapping call.
 function AddProductRow({ categoryId, onAdded }: { categoryId: string; onAdded: (product: PriceProduct) => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
 
   function submit() {
     const trimmed = name.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     startTransition(async () => {
-      const result = await addPriceProductAction(categoryId, trimmed);
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (result.product) {
-        onAdded(result.product);
-        setName("");
+      try {
+        const result = await addPriceProductAction(categoryId, trimmed);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        if (result.product) {
+          onAdded(result.product);
+          setName("");
+        }
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
@@ -92,6 +109,55 @@ function AddProductRow({ categoryId, onAdded }: { categoryId: string; onAdded: (
   );
 }
 
+// Soft-deletes (deactivates) one product from its category, after a confirm
+// dialog whose wording depends on whether the product already has saved
+// weekly prices -- checked with a quick on-demand query right before
+// confirming, rather than plumbing that flag through both admin pages.
+// Same submittingRef guard as AddProductRow, for the same reason.
+function RemoveProductControl({ product, onRemoved }: { product: PriceProduct; onRemoved: (productId: string) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
+
+  function handleClick() {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    startTransition(async () => {
+      try {
+        const hasHistory = await productHasHistoryAction(product.id);
+        const message = hasHistory
+          ? `"${product.name}" has historical price data. Removing it will hide it from future weeks; past data will be kept. Remove it anyway?`
+          : `Remove "${product.name}" from this category?`;
+        if (!window.confirm(message)) return;
+
+        setError(null);
+        const result = await deactivatePriceProductAction(product.id);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        onRemoved(product.id);
+      } finally {
+        submittingRef.current = false;
+      }
+    });
+  }
+
+  return (
+    <div className="flex shrink-0 flex-col items-end">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={handleClick}
+        className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
+      >
+        {pending ? "Removing…" : "Remove"}
+      </button>
+      {error && <p className="mt-1 max-w-[10rem] text-right text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
 export function PriceWeekForm({
   categories,
   defaultLandingInputs,
@@ -112,18 +178,33 @@ export function PriceWeekForm({
   // alongside the products seeded via migration, in both new-week and
   // edit-week mode. Never mutates the props passed in.
   const [addedProducts, setAddedProducts] = useState<Record<string, PriceProduct[]>>({});
+  // Products removed mid-session via "Remove" -- tracked separately from
+  // `addedProducts` because a product hidden here might have come from
+  // either source.
+  const [removedProductIds, setRemovedProductIds] = useState<Set<string>>(new Set());
 
-  const categoriesWithAdded = useMemo(
-    () =>
-      categories.map((category) => ({
-        ...category,
-        products: [...category.products, ...(addedProducts[category.id] ?? [])],
-      })),
-    [categories, addedProducts]
-  );
+  // Merged by product id (not just concatenated): calling any Server Action
+  // makes Next.js refresh this route's Server Components in the background,
+  // which re-fetches `categories` with the just-added product already in
+  // it -- while `addedProducts` (this component's own optimistic state)
+  // still also holds it. Without deduping by id here, that refresh alone
+  // would render the same product twice from one "Add Product" click.
+  const categoriesWithAdded = useMemo(() => {
+    return categories.map((category) => {
+      const merged = new Map<string, PriceProduct>();
+      for (const product of category.products) merged.set(product.id, product);
+      for (const product of addedProducts[category.id] ?? []) merged.set(product.id, product);
+      for (const id of removedProductIds) merged.delete(id);
+      return { ...category, products: Array.from(merged.values()) };
+    });
+  }, [categories, addedProducts, removedProductIds]);
 
   function handleProductAdded(categoryId: string, product: PriceProduct) {
     setAddedProducts((prev) => ({ ...prev, [categoryId]: [...(prev[categoryId] ?? []), product] }));
+  }
+
+  function handleProductRemoved(productId: string) {
+    setRemovedProductIds((prev) => new Set(prev).add(productId));
   }
 
   const [weekNumber, setWeekNumber] = useState(String(editingWeek?.week_number ?? ""));
@@ -285,9 +366,12 @@ export function PriceWeekForm({
                 <div key={product.id} className="rounded-lg border border-border p-3">
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="min-w-[12rem] flex-1">
-                      <label className={labelClass} htmlFor={`price_${product.id}`}>
-                        {product.name} ({category.unit})
-                      </label>
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <label className="text-xs font-medium text-muted" htmlFor={`price_${product.id}`}>
+                          {product.name} ({category.unit})
+                        </label>
+                        <RemoveProductControl product={product} onRemoved={handleProductRemoved} />
+                      </div>
                       <input
                         id={`price_${product.id}`}
                         name={`price_${product.id}`}
