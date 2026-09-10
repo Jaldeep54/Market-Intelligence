@@ -362,6 +362,15 @@ export function PriceWeekForm({
           <div className="flex flex-col gap-3">
             {category.products.map((product) => {
               const p = preview[product.id];
+              const priceValue = basePrices[product.id] ?? "";
+              // Blank means "not published this week" -- whether that's
+              // because the admin just cleared it, or (in edit mode) it
+              // loaded blank since no existingPrices row exists for this
+              // product/week. Either way saveWeeklyPricesAction skips this
+              // product entirely (parseNumberField -> null -> continue), so
+              // the same not-published cue below is accurate in both cases
+              // and needs no new-week/edit-week branching.
+              const hasPrice = priceValue.trim() !== "";
               return (
                 <div key={product.id} className="rounded-lg border border-border p-3">
                   <div className="flex flex-wrap items-end gap-3">
@@ -378,11 +387,15 @@ export function PriceWeekForm({
                         type="number"
                         step="0.0001"
                         min={0}
-                        required
-                        value={basePrices[product.id] ?? ""}
+                        value={priceValue}
                         onChange={(e) => setBasePrices((prev) => ({ ...prev, [product.id]: e.target.value }))}
                         className={inputClass}
                       />
+                      {!hasPrice && (
+                        <p className="mt-1 text-[11px] text-muted">
+                          Not published this week — will show as a gap in the trend chart.
+                        </p>
+                      )}
                     </div>
                     <div className="text-xs text-muted">
                       <div>USD: {fmt(p?.fobUsd ?? 0)}</div>
@@ -393,72 +406,80 @@ export function PriceWeekForm({
                     </div>
                   </div>
 
-                  {category.has_landing_price && (
-                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-5">
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Freight (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_freight_${product.id}`}
-                          value={landingInputs[product.id]?.freight ?? 0}
-                          onChange={(e) => updateLanding(product.id, "freight", e.target.value)}
-                          className={inputClass}
-                        />
+                  {category.has_landing_price &&
+                    (hasPrice ? (
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-5">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Freight (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_freight_${product.id}`}
+                            value={landingInputs[product.id]?.freight ?? 0}
+                            onChange={(e) => updateLanding(product.id, "freight", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Insurance (decimal, e.g. 0.0015)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            max={2}
+                            name={`landing_insurance_${product.id}`}
+                            value={landingInputs[product.id]?.insurance_pct ?? 0}
+                            onChange={(e) => updateLanding(product.id, "insurance_pct", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Duty (decimal, e.g. 0.275)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            max={2}
+                            name={`landing_duty_${product.id}`}
+                            value={landingInputs[product.id]?.duty_pct ?? 0}
+                            onChange={(e) => updateLanding(product.id, "duty_pct", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Port/CHA (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_portcha_${product.id}`}
+                            value={landingInputs[product.id]?.port_cha ?? 0}
+                            onChange={(e) => updateLanding(product.id, "port_cha", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Inland (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_inland_${product.id}`}
+                            value={landingInputs[product.id]?.inland ?? 0}
+                            onChange={(e) => updateLanding(product.id, "inland", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Insurance (decimal, e.g. 0.0015)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          max={2}
-                          name={`landing_insurance_${product.id}`}
-                          value={landingInputs[product.id]?.insurance_pct ?? 0}
-                          onChange={(e) => updateLanding(product.id, "insurance_pct", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Duty (decimal, e.g. 0.275)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          max={2}
-                          name={`landing_duty_${product.id}`}
-                          value={landingInputs[product.id]?.duty_pct ?? 0}
-                          onChange={(e) => updateLanding(product.id, "duty_pct", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Port/CHA (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_portcha_${product.id}`}
-                          value={landingInputs[product.id]?.port_cha ?? 0}
-                          onChange={(e) => updateLanding(product.id, "port_cha", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Inland (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_inland_${product.id}`}
-                          value={landingInputs[product.id]?.inland ?? 0}
-                          onChange={(e) => updateLanding(product.id, "inland", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                    </div>
-                  )}
+                    ) : (
+                      // No base price -> saveWeeklyPricesAction skips this
+                      // product wholesale, landing inputs included, so
+                      // there's nothing for them to affect this week.
+                      <p className="mt-3 border-t border-border pt-3 text-[11px] text-muted">
+                        Import/landing cost inputs are hidden until a price is entered for this product.
+                      </p>
+                    ))}
                 </div>
               );
             })}
