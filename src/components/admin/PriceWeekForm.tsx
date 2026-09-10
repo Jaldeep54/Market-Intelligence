@@ -1,7 +1,13 @@
 "use client";
 
-import { useActionState, useMemo, useState, useTransition } from "react";
-import { addPriceProductAction, saveWeeklyPricesAction, type PriceFormState } from "@/lib/actions/prices";
+import { useActionState, useMemo, useRef, useState, useTransition } from "react";
+import {
+  addPriceProductAction,
+  deactivatePriceProductAction,
+  productHasHistoryAction,
+  saveWeeklyPricesAction,
+  type PriceFormState,
+} from "@/lib/actions/prices";
 import { calculateLandingInr, toChinaFobInr, toChinaFobUsd } from "@/lib/utils/priceCalculations";
 import type { LandingInputs, PriceCategory, PriceProduct, WeeklyPriceWithWeek } from "@/lib/types/database";
 
@@ -34,24 +40,35 @@ const labelClass = "mb-1 block text-xs font-medium text-muted";
 // form or losing prices already typed for other products. Local-only state
 // (name/error/pending) -- success is reported to the parent via `onAdded`,
 // which is what actually makes the new product show up in the category list.
+//
+// submittingRef is a synchronous guard against a click firing this twice: a
+// `useTransition` `pending` flag is state, so it can lag a tick behind a
+// fast second click/Enter combo, but a plain ref is set/read immediately
+// with no render in between, so it can never miss an overlapping call.
 function AddProductRow({ categoryId, onAdded }: { categoryId: string; onAdded: (product: PriceProduct) => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
 
   function submit() {
     const trimmed = name.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     startTransition(async () => {
-      const result = await addPriceProductAction(categoryId, trimmed);
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (result.product) {
-        onAdded(result.product);
-        setName("");
+      try {
+        const result = await addPriceProductAction(categoryId, trimmed);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        if (result.product) {
+          onAdded(result.product);
+          setName("");
+        }
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
@@ -92,6 +109,55 @@ function AddProductRow({ categoryId, onAdded }: { categoryId: string; onAdded: (
   );
 }
 
+// Soft-deletes (deactivates) one product from its category, after a confirm
+// dialog whose wording depends on whether the product already has saved
+// weekly prices -- checked with a quick on-demand query right before
+// confirming, rather than plumbing that flag through both admin pages.
+// Same submittingRef guard as AddProductRow, for the same reason.
+function RemoveProductControl({ product, onRemoved }: { product: PriceProduct; onRemoved: (productId: string) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
+
+  function handleClick() {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    startTransition(async () => {
+      try {
+        const hasHistory = await productHasHistoryAction(product.id);
+        const message = hasHistory
+          ? `"${product.name}" has historical price data. Removing it will hide it from future weeks; past data will be kept. Remove it anyway?`
+          : `Remove "${product.name}" from this category?`;
+        if (!window.confirm(message)) return;
+
+        setError(null);
+        const result = await deactivatePriceProductAction(product.id);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        onRemoved(product.id);
+      } finally {
+        submittingRef.current = false;
+      }
+    });
+  }
+
+  return (
+    <div className="flex shrink-0 flex-col items-end">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={handleClick}
+        className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
+      >
+        {pending ? "Removing…" : "Remove"}
+      </button>
+      {error && <p className="mt-1 max-w-[10rem] text-right text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
 export function PriceWeekForm({
   categories,
   defaultLandingInputs,
@@ -112,18 +178,33 @@ export function PriceWeekForm({
   // alongside the products seeded via migration, in both new-week and
   // edit-week mode. Never mutates the props passed in.
   const [addedProducts, setAddedProducts] = useState<Record<string, PriceProduct[]>>({});
+  // Products removed mid-session via "Remove" -- tracked separately from
+  // `addedProducts` because a product hidden here might have come from
+  // either source.
+  const [removedProductIds, setRemovedProductIds] = useState<Set<string>>(new Set());
 
-  const categoriesWithAdded = useMemo(
-    () =>
-      categories.map((category) => ({
-        ...category,
-        products: [...category.products, ...(addedProducts[category.id] ?? [])],
-      })),
-    [categories, addedProducts]
-  );
+  // Merged by product id (not just concatenated): calling any Server Action
+  // makes Next.js refresh this route's Server Components in the background,
+  // which re-fetches `categories` with the just-added product already in
+  // it -- while `addedProducts` (this component's own optimistic state)
+  // still also holds it. Without deduping by id here, that refresh alone
+  // would render the same product twice from one "Add Product" click.
+  const categoriesWithAdded = useMemo(() => {
+    return categories.map((category) => {
+      const merged = new Map<string, PriceProduct>();
+      for (const product of category.products) merged.set(product.id, product);
+      for (const product of addedProducts[category.id] ?? []) merged.set(product.id, product);
+      for (const id of removedProductIds) merged.delete(id);
+      return { ...category, products: Array.from(merged.values()) };
+    });
+  }, [categories, addedProducts, removedProductIds]);
 
   function handleProductAdded(categoryId: string, product: PriceProduct) {
     setAddedProducts((prev) => ({ ...prev, [categoryId]: [...(prev[categoryId] ?? []), product] }));
+  }
+
+  function handleProductRemoved(productId: string) {
+    setRemovedProductIds((prev) => new Set(prev).add(productId));
   }
 
   const [weekNumber, setWeekNumber] = useState(String(editingWeek?.week_number ?? ""));
@@ -281,24 +362,40 @@ export function PriceWeekForm({
           <div className="flex flex-col gap-3">
             {category.products.map((product) => {
               const p = preview[product.id];
+              const priceValue = basePrices[product.id] ?? "";
+              // Blank means "not published this week" -- whether that's
+              // because the admin just cleared it, or (in edit mode) it
+              // loaded blank since no existingPrices row exists for this
+              // product/week. Either way saveWeeklyPricesAction skips this
+              // product entirely (parseNumberField -> null -> continue), so
+              // the same not-published cue below is accurate in both cases
+              // and needs no new-week/edit-week branching.
+              const hasPrice = priceValue.trim() !== "";
               return (
                 <div key={product.id} className="rounded-lg border border-border p-3">
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="min-w-[12rem] flex-1">
-                      <label className={labelClass} htmlFor={`price_${product.id}`}>
-                        {product.name} ({category.unit})
-                      </label>
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <label className="text-xs font-medium text-muted" htmlFor={`price_${product.id}`}>
+                          {product.name} ({category.unit})
+                        </label>
+                        <RemoveProductControl product={product} onRemoved={handleProductRemoved} />
+                      </div>
                       <input
                         id={`price_${product.id}`}
                         name={`price_${product.id}`}
                         type="number"
                         step="0.0001"
                         min={0}
-                        required
-                        value={basePrices[product.id] ?? ""}
+                        value={priceValue}
                         onChange={(e) => setBasePrices((prev) => ({ ...prev, [product.id]: e.target.value }))}
                         className={inputClass}
                       />
+                      {!hasPrice && (
+                        <p className="mt-1 text-[11px] text-muted">
+                          Not published this week — will show as a gap in the trend chart.
+                        </p>
+                      )}
                     </div>
                     <div className="text-xs text-muted">
                       <div>USD: {fmt(p?.fobUsd ?? 0)}</div>
@@ -309,72 +406,80 @@ export function PriceWeekForm({
                     </div>
                   </div>
 
-                  {category.has_landing_price && (
-                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-5">
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Freight (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_freight_${product.id}`}
-                          value={landingInputs[product.id]?.freight ?? 0}
-                          onChange={(e) => updateLanding(product.id, "freight", e.target.value)}
-                          className={inputClass}
-                        />
+                  {category.has_landing_price &&
+                    (hasPrice ? (
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-5">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Freight (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_freight_${product.id}`}
+                            value={landingInputs[product.id]?.freight ?? 0}
+                            onChange={(e) => updateLanding(product.id, "freight", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Insurance (decimal, e.g. 0.0015)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            max={2}
+                            name={`landing_insurance_${product.id}`}
+                            value={landingInputs[product.id]?.insurance_pct ?? 0}
+                            onChange={(e) => updateLanding(product.id, "insurance_pct", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Duty (decimal, e.g. 0.275)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            max={2}
+                            name={`landing_duty_${product.id}`}
+                            value={landingInputs[product.id]?.duty_pct ?? 0}
+                            onChange={(e) => updateLanding(product.id, "duty_pct", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Port/CHA (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_portcha_${product.id}`}
+                            value={landingInputs[product.id]?.port_cha ?? 0}
+                            onChange={(e) => updateLanding(product.id, "port_cha", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-muted">Inland (₹/unit)</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min={0}
+                            name={`landing_inland_${product.id}`}
+                            value={landingInputs[product.id]?.inland ?? 0}
+                            onChange={(e) => updateLanding(product.id, "inland", e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Insurance (decimal, e.g. 0.0015)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          max={2}
-                          name={`landing_insurance_${product.id}`}
-                          value={landingInputs[product.id]?.insurance_pct ?? 0}
-                          onChange={(e) => updateLanding(product.id, "insurance_pct", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Duty (decimal, e.g. 0.275)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          max={2}
-                          name={`landing_duty_${product.id}`}
-                          value={landingInputs[product.id]?.duty_pct ?? 0}
-                          onChange={(e) => updateLanding(product.id, "duty_pct", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Port/CHA (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_portcha_${product.id}`}
-                          value={landingInputs[product.id]?.port_cha ?? 0}
-                          onChange={(e) => updateLanding(product.id, "port_cha", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] text-muted">Inland (₹/unit)</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min={0}
-                          name={`landing_inland_${product.id}`}
-                          value={landingInputs[product.id]?.inland ?? 0}
-                          onChange={(e) => updateLanding(product.id, "inland", e.target.value)}
-                          className={inputClass}
-                        />
-                      </div>
-                    </div>
-                  )}
+                    ) : (
+                      // No base price -> saveWeeklyPricesAction skips this
+                      // product wholesale, landing inputs included, so
+                      // there's nothing for them to affect this week.
+                      <p className="mt-3 border-t border-border pt-3 text-[11px] text-muted">
+                        Import/landing cost inputs are hidden until a price is entered for this product.
+                      </p>
+                    ))}
                 </div>
               );
             })}
