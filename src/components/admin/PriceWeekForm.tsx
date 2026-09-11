@@ -33,7 +33,7 @@ function fmt(value: number, digits = 4): string {
 }
 
 const inputClass =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent";
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50";
 const labelClass = "mb-1 block text-xs font-medium text-muted";
 
 // Lets the admin add a new product to a category inline, without leaving the
@@ -223,6 +223,30 @@ export function PriceWeekForm({
     return initial;
   });
 
+  // Explicit "Mark as N/A" state, replacing "just leave it blank" as the way
+  // to signal a product wasn't published this week -- a disabled input is
+  // excluded from FormData on submit, so saveWeeklyPricesAction's existing
+  // "field absent -> skip this product" logic (never invents a value, never
+  // writes a row) applies with no server-side change. Edit mode defaults
+  // this to checked for any product with no existingPrices row for this
+  // week, so a saved week that skipped a product reads as "marked N/A" at a
+  // glance rather than looking like an empty field waiting to be filled in.
+  // New-week mode always starts unchecked -- nothing has been marked yet.
+  const [markedNA, setMarkedNA] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const category of categories) {
+      for (const product of category.products) {
+        initial[product.id] = Boolean(editingWeek) && !existingPrices?.[product.id];
+      }
+    }
+    return initial;
+  });
+
+  function toggleNA(productId: string, isNA: boolean) {
+    setMarkedNA((prev) => ({ ...prev, [productId]: isNA }));
+    setBasePrices((prev) => ({ ...prev, [productId]: "" }));
+  }
+
   const [landingInputs, setLandingInputs] = useState<Record<string, LandingInputs>>(() => {
     const initial: Record<string, LandingInputs> = {};
     for (const category of categories) {
@@ -363,14 +387,13 @@ export function PriceWeekForm({
             {category.products.map((product) => {
               const p = preview[product.id];
               const priceValue = basePrices[product.id] ?? "";
-              // Blank means "not published this week" -- whether that's
-              // because the admin just cleared it, or (in edit mode) it
-              // loaded blank since no existingPrices row exists for this
-              // product/week. Either way saveWeeklyPricesAction skips this
-              // product entirely (parseNumberField -> null -> continue), so
-              // the same not-published cue below is accurate in both cases
-              // and needs no new-week/edit-week branching.
-              const hasPrice = priceValue.trim() !== "";
+              const isNA = markedNA[product.id] ?? false;
+              // hasPrice drives both the FOB/landing preview and whether the
+              // landing-cost sub-fields render -- it has to fold in isNA
+              // (not just the raw input value) so checking "Mark as N/A"
+              // hides those sub-fields immediately, even though toggleNA
+              // also clears the input to "" itself.
+              const hasPrice = !isNA && priceValue.trim() !== "";
               return (
                 <div key={product.id} className="rounded-lg border border-border p-3">
                   <div className="flex flex-wrap items-end gap-3">
@@ -388,10 +411,20 @@ export function PriceWeekForm({
                         step="0.0001"
                         min={0}
                         value={priceValue}
+                        disabled={isNA}
                         onChange={(e) => setBasePrices((prev) => ({ ...prev, [product.id]: e.target.value }))}
                         className={inputClass}
                       />
-                      {!hasPrice && (
+                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
+                        <input
+                          type="checkbox"
+                          checked={isNA}
+                          onChange={(e) => toggleNA(product.id, e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-border accent-accent"
+                        />
+                        Mark as N/A (not published this week)
+                      </label>
+                      {isNA && (
                         <p className="mt-1 text-[11px] text-muted">
                           Not published this week — will show as a gap in the trend chart.
                         </p>
