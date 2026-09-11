@@ -15,6 +15,7 @@ const ITEMS = [
   { label: "Company Management", href: "/admin/companies" },
   { label: "Price Trends", href: "/admin/prices" },
   { label: "Registered Users", href: "/admin/users" },
+  { label: "User Activity", href: "/admin/activity" },
 ];
 
 export function AdminNav({ email }: { email: string | null }) {

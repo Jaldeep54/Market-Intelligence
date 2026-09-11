@@ -26,6 +26,7 @@ The schema, security policies, and the 15 tracked companies live in
 8. `20260101000009_price_trends.sql` and `20260101000010_price_trends_seed_historical.sql` (Price Trends)
 9. `20260101000011_profile_approval_status.sql` (adds the self-registration approval gate -- see section 5 below)
 10. `20260101000012_drop_escalation_column.sql` (cleanup -- drops a column that only ever supported a since-removed feature)
+11. `20260101000013_user_activity.sql` (adds the news-swipe / Price Trends / Company Profile usage counters shown on Admin -> User Activity)
 
 **Easiest way:** open the Supabase dashboard → **SQL Editor**, paste each
 file's contents in order, and click *Run*.

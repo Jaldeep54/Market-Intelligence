@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProductPriceHistory } from "@/lib/data/prices";
 import { ProductPriceDetail } from "@/components/viewer/ProductPriceDetail";
+import { recordActivityAction } from "@/lib/actions/activity";
 
 export default async function ProductPricePage({
   params,
@@ -14,6 +16,8 @@ export default async function ProductPricePage({
   const result = await getProductPriceHistory(supabase, category, slug);
 
   if (!result) notFound();
+
+  after(() => recordActivityAction("price_trends_visit"));
 
   return (
     <main className="flex flex-1 flex-col overflow-y-auto p-4 sm:p-6">
