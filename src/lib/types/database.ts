@@ -4,6 +4,9 @@
 
 export type Role = "admin" | "viewer";
 
+export type ProfileStatus = "pending" | "approved" | "rejected";
+export const PROFILE_STATUSES: ProfileStatus[] = ["pending", "approved", "rejected"];
+
 export type NewsCategory =
   | "Global Market"
   | "Indian Market"
@@ -29,6 +32,8 @@ export interface Profile {
   id: string;
   email: string;
   role: Role;
+  status: ProfileStatus;
+  escalated_at: string | null;
   created_at: string;
   updated_at: string;
 }

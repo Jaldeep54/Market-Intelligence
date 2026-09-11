@@ -22,7 +22,9 @@ The schema, security policies, and the 15 tracked companies live in
 4. `20260101000004_rls.sql`
 5. `20260101000005_seed_companies.sql`
 6. `20260101000006_news_automation.sql` (News Sources / News Inbox / Gemini pipeline -- purely additive, does not touch the tables above)
-7. `20260101000007_supabase_cron_dispatch.sql` (schedules the 2-hour source check -- see section 7 below; requires a one-time Vault secret first, do not run this one until you've read that section)
+7. `20260101000007_supabase_cron_dispatch.sql` (schedules the 2-hour source check -- see section 8 below; requires a one-time Vault secret first, do not run this one until you've read that section)
+8. `20260101000009_price_trends.sql` and `20260101000010_price_trends_seed_historical.sql` (Price Trends)
+9. `20260101000011_profile_approval_status.sql` (adds the self-registration approval gate -- see section 5 below)
 
 **Easiest way:** open the Supabase dashboard → **SQL Editor**, paste each
 file's contents in order, and click *Run*.
@@ -73,28 +75,81 @@ A database trigger (`on_auth_user_created`) automatically creates a matching
 row in `profiles` with `role = 'viewer'` for every new user. The Viewer
 account is done at this point.
 
-4. Promote the Admin account's role. In the SQL Editor, run:
+4. Promote the Admin account's role, and approve both accounts. In the SQL
+   Editor, run:
 
 ```sql
 update public.profiles
-set role = 'admin'
+set role = 'admin', status = 'approved'
 where email = 'admin@goldi.com';
+
+update public.profiles
+set status = 'approved'
+where email = 'management@goldi.com';
 ```
 
 (Supabase stores emails lower-cased internally, so match on lower-case.)
+**The `status = 'approved'` part matters:** since migration 11 (section 5
+below), every profile defaults to `status = 'pending'` and can't sign in or
+see any content until approved -- these two manually-created accounts are no
+exception, so skipping this step locks you out of your own fresh install.
 
 5. Confirm it worked:
 
 ```sql
-select email, role from public.profiles order by created_at;
+select email, role, status from public.profiles order by created_at;
 ```
 
-You should see one `admin` row and one `viewer` row.
+You should see one `admin` row and one `viewer` row, both `approved`.
 
-To add more people later, repeat steps 2 and (if they should be an admin)
-step 4 — no code changes needed.
+To add more people later: they can now self-register at `/signup` with a
+`goldisolar.com` email (see section 5 below) instead of you creating their
+account by hand -- repeat step 4's `role = 'admin'` update only if they
+should be an admin.
 
-## 5. Run it locally
+## 5. Self-registration & admin approval
+
+Beyond the two manually-created accounts above, anyone with a
+`goldisolar.com` email can self-register at `/signup`. New signups are
+**not** usable immediately -- they sit as `status = 'pending'` (migration 11)
+until you approve or reject them from **Admin -> Registered Users**, which
+highlights pending accounts at the top with Approve/Reject buttons. A
+rejected or still-pending account can't sign in and can't read any data
+(enforced by both middleware and RLS), and sees a plain explanation instead
+of a generic error.
+
+1. **Disable Supabase's own email confirmation** -- Supabase dashboard ->
+   **Authentication -> Providers -> Email -> uncheck "Confirm email"**.
+   Approval is the actual gate now, not email confirmation; leaving this
+   checked doesn't break anything but makes a new user wait on a
+   confirmation email that accomplishes nothing extra.
+2. **Set the new environment variables** (locally in `.env.local`, and in
+   Vercel's Project Settings -> Environment Variables for production -- see
+   `.env.example` for what each does and why it's server-only):
+   ```
+   SUPABASE_SERVICE_ROLE_KEY=<Project Settings -> API -> service_role key>
+   GMAIL_SMTP_USER=<the Gmail address already used for Supabase's Custom SMTP>
+   GMAIL_SMTP_APP_PASSWORD=<an App Password for that account -- https://myaccount.google.com/apppasswords>
+   CRON_SECRET=<a random value you generate, e.g. `openssl rand -hex 32`>
+   ```
+   `SUPABASE_SERVICE_ROLE_KEY` powers the admin panel's "Set new password"
+   action (`supabase.auth.admin.updateUserById`) -- this is how "forgot your
+   password" resolves to "ask an admin" without anyone ever seeing or
+   storing the user's actual password. The Gmail/`CRON_SECRET` vars power a
+   scheduled email to `jaldeep.g@goldisolar.com` if a signup sits pending for
+   over 24 hours -- see `src/app/api/cron/check-pending-approvals`.
+3. **The escalation cron's schedule** is in `vercel.json` at the repo root,
+   currently once daily (`0 13 * * *`). **Vercel's Hobby (free) plan only
+   allows once-a-day cron schedules** -- this project already hit that exact
+   limit once before (see section 8's note on the news-source check, which
+   moved to Supabase's own `pg_cron` for that reason). If you're on a paid
+   Vercel plan, you can tighten this to hourly (`0 * * * *`) for faster
+   escalation; otherwise leave it daily. Either way, set `CRON_SECRET` in
+   Vercel's project env vars too -- Vercel automatically sends it as the
+   `Authorization: Bearer <value>` header on every Cron request once that
+   variable is set, which the route checks.
+
+## 6. Run it locally
 
 ```bash
 npm install
@@ -104,7 +159,7 @@ npm run dev
 Visit http://localhost:3000 — you'll land on the login page. Sign in with
 either account you created above.
 
-## 6. Deploy to Vercel
+## 7. Deploy to Vercel
 
 1. Push this repository to GitHub (already done if you're reading this from
    the repo).
@@ -113,7 +168,7 @@ either account you created above.
    Vercel project settings.
 4. Deploy. Vercel auto-detects Next.js — no extra configuration is required.
 
-## 7. Set up automated news collection (optional)
+## 8. Set up automated news collection (optional)
 
 This adds: News Sources, News Inbox, and Gemini-assisted preparation. Skip
 this section if you only want manual news entry -- everything above works
@@ -180,7 +235,7 @@ depends on Vercel at all; Vercel only hosts the web app.
    Automation page in the app shows the resulting fetch summaries either
    way.
 
-## 8. Moving off Vercel later
+## 9. Moving off Vercel later
 
 This app only uses standard Next.js/Node.js features -- no Vercel-specific
 storage or functions, and the 2-hour schedule already lives in Supabase, not

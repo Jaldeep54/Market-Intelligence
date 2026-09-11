@@ -32,9 +32,25 @@ export function LoginForm() {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, status")
       .eq("id", data.user.id)
       .single();
+
+    if (profile?.status !== "approved") {
+      // Sign back out rather than leaving a live session sitting unused
+      // behind this message -- middleware would bounce them to
+      // /pending-approval on any navigation attempt anyway, but there's no
+      // reason to hold a session open for an account that can't do
+      // anything with it.
+      await supabase.auth.signOut();
+      setError(
+        profile?.status === "rejected"
+          ? "Your registration request was not approved. Contact your administrator for details."
+          : "Your registration is still awaiting admin approval. You'll be able to sign in once it's approved."
+      );
+      setLoading(false);
+      return;
+    }
 
     router.refresh();
 
