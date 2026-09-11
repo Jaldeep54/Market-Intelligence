@@ -8,11 +8,11 @@ function formatDate(dateStr: string): string {
   });
 }
 
-// Cycles the card's own background through a small pastel palette (see
-// globals.css) keyed by feed position, in place of a fixed bg-surface --
-// the shade change on the card itself is the "you swiped" cue, rather than
-// a separate background layer behind it.
-const CARD_TINT_CLASSES = ["bg-card-tint-1", "bg-card-tint-2", "bg-card-tint-3", "bg-card-tint-4"];
+// Alternates the card's own background between two tints (see globals.css)
+// keyed by feed position, in place of a fixed bg-surface -- the shade
+// change on the card itself is the "you swiped" cue, rather than a
+// separate background layer behind it.
+const CARD_TINT_CLASSES = ["bg-card-tint-a", "bg-card-tint-b"];
 
 export function NewsCard({ news, index }: { news: NewsWithRelations; index: number }) {
   const tintClass = CARD_TINT_CLASSES[index % CARD_TINT_CLASSES.length];
