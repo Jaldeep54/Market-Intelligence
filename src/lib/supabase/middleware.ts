@@ -2,7 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseEnv } from "./env";
 
-const PUBLIC_PATHS = ["/login"];
+// /reset-password is deliberately NOT here: by the time a user reaches it,
+// /auth/callback should already have exchanged their recovery code for a
+// real session, so the normal "no user -> redirect to /login" rule below is
+// the correct guard against someone opening it directly with no valid
+// recovery session.
+const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/auth/callback"];
 
 function isPublicPath(pathname: string): boolean {
   return (

@@ -1,8 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+
+const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  invalid_reset_link:
+    "That link is invalid or has expired. Request a new one, and be sure to open it in the same browser you requested it from.",
+};
 
 export function LoginForm() {
   const router = useRouter();
@@ -11,6 +17,9 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const callbackErrorCode = searchParams.get("error");
+  const callbackError = callbackErrorCode ? CALLBACK_ERROR_MESSAGES[callbackErrorCode] ?? null : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -54,6 +63,12 @@ export function LoginForm() {
         <p className="mt-1 text-sm text-muted">Sign in to continue</p>
       </div>
 
+      {callbackError && (
+        <p className="mb-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+          {callbackError}
+        </p>
+      )}
+
       <form
         onSubmit={handleSubmit}
         className="rounded-xl border border-border bg-surface p-6 shadow-sm"
@@ -75,9 +90,14 @@ export function LoginForm() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-foreground">
-              Password
-            </label>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <label htmlFor="password" className="block text-sm font-medium text-foreground">
+                Password
+              </label>
+              <Link href="/forgot-password" className="text-xs font-medium text-accent hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
@@ -103,7 +123,10 @@ export function LoginForm() {
       </form>
 
       <p className="mt-6 text-center text-xs text-muted">
-        Access is managed internally. Contact your administrator if you need an account.
+        Don&apos;t have an account?{" "}
+        <Link href="/signup" className="font-medium text-accent hover:underline">
+          Register with your goldisolar.com email
+        </Link>
       </p>
     </div>
   );
