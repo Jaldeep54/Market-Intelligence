@@ -35,8 +35,13 @@ export async function approveUserAction(userId: string): Promise<UserActionState
   const check = await requireAdmin();
   if ("error" in check) return check;
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({ status: "approved" }).eq("id", userId);
+  // profiles has no UPDATE policy for authenticated users at all (see
+  // 20260101000004_rls.sql) -- the session-bound client's update() here
+  // was being silently dropped to zero rows by RLS with no error returned,
+  // so requireAdmin()'s check above is what actually gates this, same as
+  // setUserPasswordAction below.
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.from("profiles").update({ status: "approved" }).eq("id", userId);
   if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
@@ -47,8 +52,8 @@ export async function rejectUserAction(userId: string): Promise<UserActionState>
   const check = await requireAdmin();
   if ("error" in check) return check;
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({ status: "rejected" }).eq("id", userId);
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.from("profiles").update({ status: "rejected" }).eq("id", userId);
   if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
