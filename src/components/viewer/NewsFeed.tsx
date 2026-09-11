@@ -19,7 +19,7 @@ export function NewsFeed({
       items={items}
       itemKey={(item) => item.id}
       emptyMessage={emptyMessage ?? "No published articles match this view yet."}
-      renderItem={(item) => <NewsCard news={item} />}
+      renderItem={(item, index) => <NewsCard news={item} index={index} />}
     />
   );
 }

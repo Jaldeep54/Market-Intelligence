@@ -8,9 +8,16 @@ function formatDate(dateStr: string): string {
   });
 }
 
-export function NewsCard({ news }: { news: NewsWithRelations }) {
+// Cycles the card's own background through a small pastel palette (see
+// globals.css) keyed by feed position, in place of a fixed bg-surface --
+// the shade change on the card itself is the "you swiped" cue, rather than
+// a separate background layer behind it.
+const CARD_TINT_CLASSES = ["bg-card-tint-1", "bg-card-tint-2", "bg-card-tint-3", "bg-card-tint-4"];
+
+export function NewsCard({ news, index }: { news: NewsWithRelations; index: number }) {
+  const tintClass = CARD_TINT_CLASSES[index % CARD_TINT_CLASSES.length];
   return (
-    <article className="flex flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8">
+    <article className={`flex flex-col rounded-2xl border border-border ${tintClass} p-6 shadow-sm sm:p-8`}>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-accent">
         <span className="rounded-full bg-accent/10 px-2.5 py-1">{news.category}</span>
         {news.company && (

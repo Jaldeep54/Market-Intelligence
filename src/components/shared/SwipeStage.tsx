@@ -22,12 +22,6 @@ interface SwipeStageProps<T> {
 const SWIPE_THRESHOLD_PX = 40;
 const WHEEL_THRESHOLD = 24;
 const WHEEL_COOLDOWN_MS = 550;
-// Wayfinding cue: a subtle background-color shift keyed to the current
-// index, so paging to the next/previous item gives a "something changed"
-// signal distinct from the card content itself. Defined in globals.css
-// (each with its own light/dark value, following the --background/--surface
-// token pattern) rather than hardcoded here.
-const STAGE_TINTS = ["var(--stage-tint-1)", "var(--stage-tint-2)", "var(--stage-tint-3)", "var(--stage-tint-4)"];
 // Small buffer so a scroll position that's off-by-a-fraction-of-a-pixel
 // (common with fractional zoom levels / subpixel rendering) still counts
 // as "at the edge" instead of silently blocking paging forever.
@@ -226,16 +220,16 @@ export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: Swip
 
   const current = items[safeIndex];
   const progressPercent = ((safeIndex + 1) / items.length) * 100;
-  const stageTint = STAGE_TINTS[safeIndex % STAGE_TINTS.length];
 
   return (
     <div
       ref={rootRef}
-      className="flex flex-1 flex-col overflow-hidden transition-colors duration-500 ease-out"
-      style={{
-        backgroundColor: stageTint,
-        ...(stageHeight !== null ? { height: stageHeight, maxHeight: stageHeight, minHeight: stageHeight } : null),
-      }}
+      className="flex flex-1 flex-col overflow-hidden"
+      style={
+        stageHeight !== null
+          ? { height: stageHeight, maxHeight: stageHeight, minHeight: stageHeight }
+          : undefined
+      }
     >
       <div className="h-1 w-full shrink-0 bg-border/50">
         <div
