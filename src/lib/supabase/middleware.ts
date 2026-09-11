@@ -2,11 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseEnv } from "./env";
 
-// /verify-email and /reset-password both need to be public too: unlike a
-// link-based flow, they're reached by a plain client-side redirect (from
-// signUpAction / ForgotPasswordForm) *before* the OTP has been entered, so
-// there's no session yet at page-load time.
-const PUBLIC_PATHS = ["/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"];
+// /reset-password needs to be public: it's reached by a plain client-side
+// redirect (from ForgotPasswordForm) *before* the recovery OTP has been
+// entered, so there's no session yet at page-load time.
+const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password"];
 
 function isPublicPath(pathname: string): boolean {
   return (
@@ -53,14 +52,27 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && (pathname === "/login" || pathname.startsWith("/admin"))) {
+  if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, status")
       .eq("id", user.id)
       .single();
 
-    if (pathname === "/login") {
+    // A pending/rejected account is authenticated (it has a real session)
+    // but not yet usable -- gate every route except the page that explains
+    // why, checked before the /login and /admin rules below so it applies
+    // regardless of which page they're trying to reach.
+    if (profile?.status !== "approved") {
+      if (pathname !== "/pending-approval") {
+        return NextResponse.redirect(new URL("/pending-approval", request.url));
+      }
+      return response;
+    }
+
+    // An approved user has no reason to see either the sign-in form or the
+    // pending-approval page -- send them where they actually belong.
+    if (pathname === "/login" || pathname === "/pending-approval") {
       return NextResponse.redirect(
         new URL(profile?.role === "admin" ? "/admin" : "/", request.url)
       );

@@ -12,13 +12,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, status")
     .eq("id", user.id)
     .single();
 
-  // Middleware already blocks non-admins from /admin; this is a defense-in-depth
-  // check in case a page is ever rendered outside the middleware matcher.
-  if (profile?.role !== "admin") redirect("/");
+  // Middleware already blocks non-admins (and non-approved accounts) from
+  // /admin; this is a defense-in-depth check in case a page is ever
+  // rendered outside the middleware matcher.
+  if (profile?.role !== "admin" || profile?.status !== "approved") redirect("/");
 
   return (
     <div className="flex min-h-screen flex-1 flex-col">

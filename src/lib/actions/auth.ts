@@ -41,10 +41,10 @@ export async function signUpAction(_prevState: AuthFormState, formData: FormData
     return { error: error.message };
   }
 
-  // The Supabase project's "Confirm signup" email template sends a 6-digit
-  // OTP (not a link), so the account always needs verifying on
-  // /verify-email regardless of what signUp() returned -- the
-  // handle_new_user trigger has already created the viewer profile either
-  // way, and verifyOtp() there is what actually establishes the session.
-  redirect(`/verify-email?email=${encodeURIComponent(email)}`);
+  // No email confirmation step ("Confirm email" is disabled on the Supabase
+  // project -- see docs/SETUP.md): the handle_new_user trigger creates the
+  // profile with status = 'pending' by default, and that status -- not
+  // email confirmation -- is the actual gate. The account is unusable until
+  // an admin approves it from /admin/users.
+  redirect("/pending-approval");
 }
