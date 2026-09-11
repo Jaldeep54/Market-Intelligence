@@ -10,17 +10,16 @@
   --accent-foreground: #ffffff;
   --danger: #dc2626;
 
-  /* NewsCard's per-item wayfinding cue: the card itself cycles through
-     these instead of a fixed --surface white, via index % 4 in
+  /* NewsCard's per-item wayfinding cue: the card itself alternates between
+     these two instead of a fixed --surface white, via index % 2 in
      NewsCard.tsx, so the shade change on the card is what signals a swipe
-     happened. Kept genuinely pastel/light (~97% lightness, close to
-     --surface's own 100%) so --foreground text and the accent/border
-     badges on top of it stay exactly as readable as they are on plain
-     --surface today -- this is a subtle cue, not a colorful redesign. */
-  --card-tint-1: #eff6ff; /* soft blue */
-  --card-tint-2: #ecfdf5; /* soft green */
-  --card-tint-3: #fffbeb; /* soft amber */
-  --card-tint-4: #fff1f2; /* soft rose */
+     happened. Both stay in the same cool blue-slate family as
+     --background/--border/--foreground (not a hue that would fight
+     --accent's teal), and both hold --surface's own ~97-98% lightness so
+     --foreground text and the accent/border badges on top read exactly as
+     clearly as they do on plain --surface today. */
+  --card-tint-a: #eff6ff; /* light blue */
+  --card-tint-b: #f5f3ff; /* light violet */
 }
 
 @theme inline {
@@ -32,10 +31,8 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-danger: var(--danger);
-  --color-card-tint-1: var(--card-tint-1);
-  --color-card-tint-2: var(--card-tint-2);
-  --color-card-tint-3: var(--card-tint-3);
-  --color-card-tint-4: var(--card-tint-4);
+  --color-card-tint-a: var(--card-tint-a);
+  --color-card-tint-b: var(--card-tint-b);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -51,12 +48,10 @@
     --accent-foreground: #052e2b;
 
     /* Same intent as the light values above: close in lightness to
-       --surface's own #111a2c (~10% L) so --foreground and the badges
+       --surface's own #111a2c (~10-12% L) so --foreground and the badges
        stay exactly as readable, just hue-shifted per card. */
-    --card-tint-1: #101b2e; /* soft blue */
-    --card-tint-2: #0d1f19; /* soft green */
-    --card-tint-3: #201a0d; /* soft amber */
-    --card-tint-4: #201219; /* soft rose */
+    --card-tint-a: #101b2e; /* light blue */
+    --card-tint-b: #191631; /* light violet */
   }
 }
 
