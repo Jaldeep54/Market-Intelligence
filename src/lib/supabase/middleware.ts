@@ -2,12 +2,11 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseEnv } from "./env";
 
-// /reset-password is deliberately NOT here: by the time a user reaches it,
-// /auth/callback should already have exchanged their recovery code for a
-// real session, so the normal "no user -> redirect to /login" rule below is
-// the correct guard against someone opening it directly with no valid
-// recovery session.
-const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/auth/callback"];
+// /verify-email and /reset-password both need to be public too: unlike a
+// link-based flow, they're reached by a plain client-side redirect (from
+// signUpAction / ForgotPasswordForm) *before* the OTP has been entered, so
+// there's no session yet at page-load time.
+const PUBLIC_PATHS = ["/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"];
 
 function isPublicPath(pathname: string): boolean {
   return (

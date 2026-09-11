@@ -5,11 +5,6 @@ import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
-  invalid_reset_link:
-    "That link is invalid or has expired. Request a new one, and be sure to open it in the same browser you requested it from.",
-};
-
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -17,9 +12,6 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const callbackErrorCode = searchParams.get("error");
-  const callbackError = callbackErrorCode ? CALLBACK_ERROR_MESSAGES[callbackErrorCode] ?? null : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -62,12 +54,6 @@ export function LoginForm() {
         </h1>
         <p className="mt-1 text-sm text-muted">Sign in to continue</p>
       </div>
-
-      {callbackError && (
-        <p className="mb-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-          {callbackError}
-        </p>
-      )}
 
       <form
         onSubmit={handleSubmit}
