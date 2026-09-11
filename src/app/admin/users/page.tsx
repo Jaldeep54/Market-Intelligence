@@ -7,13 +7,15 @@ export default async function AdminUsersPage() {
     .select("id,email,role,created_at")
     .order("created_at", { ascending: true });
 
+  const count = profiles?.length ?? 0;
+
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-lg font-semibold text-foreground">Users</h1>
+        <h1 className="text-lg font-semibold text-foreground">Registered Users</h1>
         <p className="mt-1 text-sm text-muted">
-          Roles are managed directly in Supabase for security. See docs/SETUP.md for
-          instructions.
+          {count} registered user{count === 1 ? "" : "s"}. Roles are managed directly in Supabase
+          for security. See docs/SETUP.md for instructions.
         </p>
       </div>
 
@@ -23,6 +25,7 @@ export default async function AdminUsersPage() {
             <tr className="border-b border-border bg-surface text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Role</th>
+              <th className="px-4 py-3 font-medium">Registered</th>
             </tr>
           </thead>
           <tbody>
@@ -37,6 +40,13 @@ export default async function AdminUsersPage() {
                   >
                     {p.role}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-muted">
+                  {new Date(p.created_at).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
                 </td>
               </tr>
             ))}
