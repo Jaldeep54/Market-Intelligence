@@ -9,6 +9,16 @@
   --accent: #0f766e;
   --accent-foreground: #ffffff;
   --danger: #dc2626;
+
+  /* SwipeStage's per-item wayfinding cue (see safeIndex % N there) -- each
+     stays within a couple of RGB points of --background's own lightness so
+     it reads as a quiet ambient shift behind NewsCard's bg-surface, never
+     as a distinct "colored screen." stage-tint-1 intentionally equals
+     --background so the cycle includes a neutral step, not just tints. */
+  --stage-tint-1: #f8fafc; /* cool blue (== --background) */
+  --stage-tint-2: #faf8f3; /* warm sand */
+  --stage-tint-3: #f4faf8; /* soft mint, echoes --accent's hue family */
+  --stage-tint-4: #f8f7fb; /* soft lavender */
 }
 
 @theme inline {
@@ -20,6 +30,10 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-danger: var(--danger);
+  --color-stage-tint-1: var(--stage-tint-1);
+  --color-stage-tint-2: var(--stage-tint-2);
+  --color-stage-tint-3: var(--stage-tint-3);
+  --color-stage-tint-4: var(--stage-tint-4);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -33,6 +47,11 @@
     --border: #223047;
     --accent: #2dd4bf;
     --accent-foreground: #052e2b;
+
+    --stage-tint-1: #0b1220; /* cool navy (== --background) */
+    --stage-tint-2: #14100d; /* warm dark */
+    --stage-tint-3: #0a1512; /* dark mint */
+    --stage-tint-4: #10101c; /* dark lavender */
   }
 }
 
