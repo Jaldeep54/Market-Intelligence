@@ -92,14 +92,9 @@ export function LoginForm() {
             />
           </div>
           <div>
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <label htmlFor="password" className="block text-sm font-medium text-foreground">
-                Password
-              </label>
-              <Link href="/forgot-password" className="text-xs font-medium text-accent hover:underline">
-                Forgot password?
-              </Link>
-            </div>
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-foreground">
+              Password
+            </label>
             <input
               id="password"
               type="password"
@@ -129,6 +124,9 @@ export function LoginForm() {
         <Link href="/signup" className="font-medium text-accent hover:underline">
           Register with your goldisolar.com email
         </Link>
+      </p>
+      <p className="mt-2 text-center text-xs text-muted">
+        Forgot your password? Contact your administrator to have it reset.
       </p>
     </div>
   );

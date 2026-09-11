@@ -33,7 +33,6 @@ export interface Profile {
   email: string;
   role: Role;
   status: ProfileStatus;
-  escalated_at: string | null;
   created_at: string;
   updated_at: string;
 }
