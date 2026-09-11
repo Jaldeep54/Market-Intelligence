@@ -17,6 +17,11 @@ interface SwipeStageProps<T> {
   itemKey: (item: T, index: number) => string;
   renderItem: (item: T, index: number) => ReactNode;
   emptyMessage?: string;
+  // Fired only on an actual navigation (index genuinely changes) -- not
+  // on every goNext/goPrev call, since those clamp at the boundaries and
+  // a swipe/click there is a no-op. Optional: callers that don't care
+  // (e.g. CompanyProfileFeed) simply omit it.
+  onIndexChange?: (index: number) => void;
 }
 
 const SWIPE_THRESHOLD_PX = 40;
@@ -71,7 +76,7 @@ function isAtBottom(el: HTMLElement | null): boolean {
 // Note: pass a `key` prop from the caller (e.g. key={filtersSignature}) to
 // reset paging to the first item whenever the underlying item set changes
 // for a new reason (new filter applied) rather than just shrinking/growing.
-export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: SwipeStageProps<T>) {
+export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage, onIndexChange }: SwipeStageProps<T>) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<Direction>("next");
   const touchStartX = useRef<number | null>(null);
@@ -134,14 +139,20 @@ export function SwipeStage<T>({ items, itemKey, renderItem, emptyMessage }: Swip
   const safeIndex = items.length === 0 ? 0 : Math.min(index, items.length - 1);
 
   const goNext = useCallback(() => {
+    const nextIndex = Math.min(safeIndex + 1, Math.max(items.length - 1, 0));
+    if (nextIndex === safeIndex) return; // already at the last item -- not a real navigation
     setDirection("next");
-    setIndex(Math.min(safeIndex + 1, Math.max(items.length - 1, 0)));
-  }, [safeIndex, items.length]);
+    setIndex(nextIndex);
+    onIndexChange?.(nextIndex);
+  }, [safeIndex, items.length, onIndexChange]);
 
   const goPrev = useCallback(() => {
+    const prevIndex = Math.max(safeIndex - 1, 0);
+    if (prevIndex === safeIndex) return; // already at the first item -- not a real navigation
     setDirection("prev");
-    setIndex(Math.max(safeIndex - 1, 0));
-  }, [safeIndex]);
+    setIndex(prevIndex);
+    onIndexChange?.(prevIndex);
+  }, [safeIndex, onIndexChange]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

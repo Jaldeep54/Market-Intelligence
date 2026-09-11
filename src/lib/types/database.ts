@@ -37,6 +37,17 @@ export interface Profile {
   updated_at: string;
 }
 
+// Running usage counters for a registered viewer -- see
+// supabase/migrations/20260101000013_user_activity.sql. No per-event
+// history, just totals; incremented only via the record_activity() RPC.
+export interface UserActivity {
+  user_id: string;
+  news_swipes: number;
+  price_trends_visits: number;
+  company_profile_visits: number;
+  updated_at: string;
+}
+
 export interface Company {
   id: string;
   name: string;
