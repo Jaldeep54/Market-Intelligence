@@ -12,7 +12,6 @@ export async function signOutAction() {
 
 export interface AuthFormState {
   error?: string;
-  info?: string;
 }
 
 // The domain restriction is enforced here, not just in SignupForm's
@@ -37,20 +36,15 @@ export async function signUpAction(_prevState: AuthFormState, formData: FormData
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { error } = await supabase.auth.signUp({ email, password });
   if (error) {
     return { error: error.message };
   }
 
-  // If the Supabase project has "Confirm email" enabled, signUp() returns
-  // no session until the confirmation link is clicked (that link lands on
-  // /auth/callback, same as the password-reset flow). If confirmation is
-  // disabled, a session comes back immediately -- the handle_new_user
-  // trigger has already created the viewer profile, so it's safe to send
-  // them straight in.
-  if (!data.session) {
-    return { info: "Check your goldisolar.com inbox to confirm your account before signing in." };
-  }
-
-  redirect("/");
+  // The Supabase project's "Confirm signup" email template sends a 6-digit
+  // OTP (not a link), so the account always needs verifying on
+  // /verify-email regardless of what signUp() returned -- the
+  // handle_new_user trigger has already created the viewer profile either
+  // way, and verifyOtp() there is what actually establishes the session.
+  redirect(`/verify-email?email=${encodeURIComponent(email)}`);
 }

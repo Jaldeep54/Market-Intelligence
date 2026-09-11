@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { ResetPasswordForm } from "@/components/auth/ResetPasswordForm";
+import { VerifyEmailForm } from "@/components/auth/VerifyEmailForm";
 
-export default async function ResetPasswordPage({
+export default async function VerifyEmailPage({
   searchParams,
 }: {
   searchParams: Promise<{ email?: string }>;
@@ -14,8 +14,8 @@ export default async function ResetPasswordPage({
         <div className="w-full max-w-sm text-center">
           <p className="text-sm text-foreground">
             Missing email address.{" "}
-            <Link href="/forgot-password" className="font-medium text-accent hover:underline">
-              Request a reset code
+            <Link href="/signup" className="font-medium text-accent hover:underline">
+              Sign up again
             </Link>
             .
           </p>
@@ -26,7 +26,7 @@ export default async function ResetPasswordPage({
 
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-16">
-      <ResetPasswordForm email={email} />
+      <VerifyEmailForm email={email} />
     </main>
   );
 }
