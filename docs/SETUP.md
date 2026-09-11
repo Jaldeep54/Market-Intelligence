@@ -25,6 +25,7 @@ The schema, security policies, and the 15 tracked companies live in
 7. `20260101000007_supabase_cron_dispatch.sql` (schedules the 2-hour source check -- see section 8 below; requires a one-time Vault secret first, do not run this one until you've read that section)
 8. `20260101000009_price_trends.sql` and `20260101000010_price_trends_seed_historical.sql` (Price Trends)
 9. `20260101000011_profile_approval_status.sql` (adds the self-registration approval gate -- see section 5 below)
+10. `20260101000012_drop_escalation_column.sql` (cleanup -- drops a column that only ever supported a since-removed feature)
 
 **Easiest way:** open the Supabase dashboard → **SQL Editor**, paste each
 file's contents in order, and click *Run*.
@@ -118,36 +119,28 @@ rejected or still-pending account can't sign in and can't read any data
 (enforced by both middleware and RLS), and sees a plain explanation instead
 of a generic error.
 
+There is no self-service password reset and no automated reminder email for
+a pending signup -- if someone forgot their password, or a signup has been
+sitting pending for a while, checking **Admin -> Registered Users**
+yourself (or the person emailing you) is the whole mechanism. This is
+deliberate: it keeps the account model simple and avoids a second
+credential (SMTP) or a second scheduled job for a small user base.
+
 1. **Disable Supabase's own email confirmation** -- Supabase dashboard ->
    **Authentication -> Providers -> Email -> uncheck "Confirm email"**.
    Approval is the actual gate now, not email confirmation; leaving this
    checked doesn't break anything but makes a new user wait on a
    confirmation email that accomplishes nothing extra.
-2. **Set the new environment variables** (locally in `.env.local`, and in
+2. **Set the new environment variable** (locally in `.env.local`, and in
    Vercel's Project Settings -> Environment Variables for production -- see
-   `.env.example` for what each does and why it's server-only):
+   `.env.example` for the full explanation of why it's server-only):
    ```
    SUPABASE_SERVICE_ROLE_KEY=<Project Settings -> API -> service_role key>
-   GMAIL_SMTP_USER=<the Gmail address already used for Supabase's Custom SMTP>
-   GMAIL_SMTP_APP_PASSWORD=<an App Password for that account -- https://myaccount.google.com/apppasswords>
-   CRON_SECRET=<a random value you generate, e.g. `openssl rand -hex 32`>
    ```
-   `SUPABASE_SERVICE_ROLE_KEY` powers the admin panel's "Set new password"
-   action (`supabase.auth.admin.updateUserById`) -- this is how "forgot your
+   This powers the admin panel's "Set new password" action
+   (`supabase.auth.admin.updateUserById`) -- this is how "forgot your
    password" resolves to "ask an admin" without anyone ever seeing or
-   storing the user's actual password. The Gmail/`CRON_SECRET` vars power a
-   scheduled email to `jaldeep.g@goldisolar.com` if a signup sits pending for
-   over 24 hours -- see `src/app/api/cron/check-pending-approvals`.
-3. **The escalation cron's schedule** is in `vercel.json` at the repo root,
-   currently once daily (`0 13 * * *`). **Vercel's Hobby (free) plan only
-   allows once-a-day cron schedules** -- this project already hit that exact
-   limit once before (see section 8's note on the news-source check, which
-   moved to Supabase's own `pg_cron` for that reason). If you're on a paid
-   Vercel plan, you can tighten this to hourly (`0 * * * *`) for faster
-   escalation; otherwise leave it daily. Either way, set `CRON_SECRET` in
-   Vercel's project env vars too -- Vercel automatically sends it as the
-   `Authorization: Bearer <value>` header on every Cron request once that
-   variable is set, which the route checks.
+   storing the user's actual password.
 
 ## 6. Run it locally
 

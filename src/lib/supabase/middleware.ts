@@ -2,10 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseEnv } from "./env";
 
-// /reset-password needs to be public: it's reached by a plain client-side
-// redirect (from ForgotPasswordForm) *before* the recovery OTP has been
-// entered, so there's no session yet at page-load time.
-const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password"];
+const PUBLIC_PATHS = ["/login", "/signup"];
 
 function isPublicPath(pathname: string): boolean {
   return (
