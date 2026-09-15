@@ -169,6 +169,102 @@ Return a JSON object with exactly these fields:
 Return only the JSON object.`;
 }
 
+// --- News Inbox "Translate to Gujarati" -------------------------------------
+
+export interface GeminiTranslateInput {
+  title: string;
+  description: string;
+}
+
+export interface GeminiTranslateOutput {
+  titleGu: string;
+  descriptionGu: string;
+}
+
+export interface GeminiTranslateSuccess {
+  ok: true;
+  data: GeminiTranslateOutput;
+  model: string;
+}
+
+export type GeminiTranslateResult = GeminiTranslateSuccess | GeminiFailure;
+
+const geminiTranslateOutputSchema = z.object({
+  title_gu: z.string().trim().min(1).max(300),
+  description_gu: z.string().trim().min(1).max(1500),
+});
+
+// Keeping technical/industry terms in English-but-Gujarati-script (rather
+// than fully translated) is the one rule that matters here -- everything
+// else is a normal, natural translation. Unlike buildPrompt() above, there
+// is no word-count target to retry against: a translation just needs to
+// carry the same meaning as its English source, not hit a fixed length.
+function buildTranslatePrompt(input: GeminiTranslateInput): string {
+  return `You are translating a solar-industry market intelligence news item from English into Gujarati, for readers who work in the Indian solar/renewable-energy industry.
+
+English title: "${input.title}"
+
+English description:
+"""
+${input.description}
+"""
+
+Translate BOTH the title and the description into natural, fluent Gujarati (ગુજરાતી script).
+
+Critical rule for technical and industry-specific terms -- company names, product names, technology names, units, acronyms, and specialized industry vocabulary (e.g. "Solar Module", "Inverter", "Wafer", "Ingot", "Polysilicon", "GW", "MW", "DCR", "ALMM"): do NOT translate these into a native Gujarati word. Instead, transliterate them phonetically into Gujarati script, preserving the English pronunciation. For example, "Solar Module" must become "સોલાર મોડ્યુલ" (a phonetic rendering), never a fully Gujarati-translated equivalent term.
+
+All general, non-technical language -- grammar, connectors, common words, sentence structure -- should be translated into natural, fluent Gujarati.
+
+Do not add, remove, or summarize information -- translate the full meaning of both fields.
+
+Return a JSON object with exactly these fields:
+- "title_gu": the Gujarati translation of the title, following the rules above.
+- "description_gu": the Gujarati translation of the description, following the rules above.
+
+Return only the JSON object.`;
+}
+
+export async function translateNewsToGujarati(input: GeminiTranslateInput): Promise<GeminiTranslateResult> {
+  const model = resolveModel();
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      errorKind: "missing_key",
+      message: "Gemini is not configured yet. Ask the project owner to set GEMINI_API_KEY.",
+      model,
+    };
+  }
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    prompt: buildTranslatePrompt(input),
+    logLabel: "translateNewsToGujarati",
+    zodSchema: geminiTranslateOutputSchema,
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        title_gu: { type: Type.STRING },
+        description_gu: { type: Type.STRING },
+      },
+      required: ["title_gu", "description_gu"],
+    },
+  });
+
+  if (!result.ok) return result;
+
+  return {
+    ok: true,
+    model,
+    data: {
+      titleGu: result.data.title_gu,
+      descriptionGu: result.data.description_gu,
+    },
+  };
+}
+
 // --- Add News "Generate with Gemini" (from a source URL) -------------------
 
 export interface GeminiDraftInput {

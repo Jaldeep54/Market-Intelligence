@@ -5,7 +5,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCandidateById } from "@/lib/data/candidates";
 import { getCompanies } from "@/lib/data/companies";
-import { recordGeminiCrash, runGeminiPrepare, type GeminiCompanyLookup, type GeminiPrepareOutcome } from "@/lib/automation/candidatePrepare";
+import {
+  recordGeminiCrash,
+  runGeminiPrepare,
+  runGeminiTranslate,
+  type GeminiCompanyLookup,
+  type GeminiPrepareOutcome,
+  type GeminiTranslateOutcome,
+} from "@/lib/automation/candidatePrepare";
 import { readCandidatePrepForm } from "@/lib/validation/candidates";
 import { syncTags } from "@/lib/utils/tags";
 
@@ -17,6 +24,11 @@ export interface CandidateActionState {
   // component's local state doesn't automatically re-sync from a
   // revalidated server prop once it's already mounted.
   data?: GeminiPrepareOutcome;
+}
+
+export interface CandidateTranslateState {
+  error?: string;
+  data?: GeminiTranslateOutcome;
 }
 
 // "Prepare with Gemini" -- runs only when the admin clicks it, either on
@@ -70,6 +82,50 @@ export async function prepareCandidateWithGeminiAction(candidateId: string): Pro
   return { data: result.data };
 }
 
+// "Translate to Gujarati" -- runs only when the admin clicks it, next to
+// "Prepare with Gemini" on the News Inbox review page. Translates whatever
+// is currently the candidate's English prepared content (falling back to
+// the original article title/description if it's never been prepared),
+// matching what the review form itself shows. A failure here never touches
+// the English prepared_title/prepared_description or gemini_error -- it
+// only ever reports back to this one button.
+export async function translateCandidateToGujaratiAction(candidateId: string): Promise<CandidateTranslateState> {
+  const supabase = await createClient();
+  const candidate = await getCandidateById(supabase, candidateId);
+  if (!candidate) return { error: "This article could not be found." };
+
+  const { data: userData } = await supabase.auth.getUser();
+
+  let result: Awaited<ReturnType<typeof runGeminiTranslate>>;
+  try {
+    result = await runGeminiTranslate(
+      supabase,
+      candidateId,
+      {
+        title: candidate.prepared_title ?? candidate.article.original_title,
+        description:
+          candidate.prepared_description ?? candidate.article.original_description ?? candidate.article.original_title,
+      },
+      userData.user?.id ?? null
+    );
+  } catch (err) {
+    console.error(`[translateCandidateToGujaratiAction] threw for candidate ${candidateId}:`, err);
+    await supabase.from("ai_processing_logs").insert({
+      candidate_id: candidateId,
+      model: "unknown",
+      status: "error",
+      error_message: err instanceof Error ? err.message : "Translation crashed unexpectedly.",
+      requested_by: userData.user?.id ?? null,
+    });
+    return { error: err instanceof Error ? err.message : "Translation crashed unexpectedly. Please try again." };
+  }
+
+  revalidatePath(`/admin/inbox/${candidateId}`);
+
+  if (!result.ok) return { error: result.error };
+  return { data: result.data };
+}
+
 // One form drives both buttons ("Save" and "Approve & Publish"): each
 // <button type="submit" name="intent" value="save"|"publish"> tells this
 // single action which path to take, so both always act on the exact same
@@ -113,6 +169,8 @@ async function saveCandidate(candidateId: string, formData: FormData): Promise<C
       prepared_company_id: parsed.data.company_id || null,
       prepared_news_date: parsed.data.news_date,
       prepared_tags: parsed.data.tags,
+      prepared_title_gu: parsed.data.title_gu || null,
+      prepared_description_gu: parsed.data.description_gu || null,
       status: "prepared",
       reviewed_by: userData.user?.id ?? null,
       reviewed_at: new Date().toISOString(),
@@ -199,6 +257,8 @@ async function performPublish(candidateId: string, formData: FormData): Promise<
       source_url: sourceUrl,
       published: true,
       created_by: userData.user?.id ?? null,
+      title_gu: parsed.data.title_gu || null,
+      description_gu: parsed.data.description_gu || null,
     })
     .select("id")
     .single();
@@ -218,6 +278,8 @@ async function performPublish(candidateId: string, formData: FormData): Promise<
       prepared_company_id: parsed.data.company_id || null,
       prepared_news_date: parsed.data.news_date,
       prepared_tags: parsed.data.tags,
+      prepared_title_gu: parsed.data.title_gu || null,
+      prepared_description_gu: parsed.data.description_gu || null,
       status: "published",
       published_news_id: inserted.id,
       approved_by: userData.user?.id ?? null,
