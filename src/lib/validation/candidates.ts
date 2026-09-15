@@ -19,6 +19,11 @@ export const candidatePrepSchema = z
     company_id: z.string().trim().optional(),
     news_date: z.string().trim().min(1, "News date is required"),
     tags: z.array(z.string().trim().min(1)).max(6, "Use at most a handful of tags"),
+    // Optional: most candidates never get a Gujarati translation. Left
+    // blank (rather than validated like title/description above) so saving
+    // never fails just because no one has translated this article yet.
+    title_gu: z.string().trim().optional(),
+    description_gu: z.string().trim().optional(),
   })
   .refine((data) => data.category !== "Top Company News" || Boolean(data.company_id), {
     message: "Company is required for Top Company News",
@@ -35,5 +40,7 @@ export function readCandidatePrepForm(formData: FormData) {
     company_id: String(formData.get("company_id") ?? ""),
     news_date: String(formData.get("news_date") ?? ""),
     tags: parseTagsInput(String(formData.get("tags") ?? "")),
+    title_gu: String(formData.get("title_gu") ?? ""),
+    description_gu: String(formData.get("description_gu") ?? ""),
   });
 }

@@ -111,6 +111,8 @@ export interface NewsRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  title_gu: string | null;
+  description_gu: string | null;
 }
 
 export interface Tag {
@@ -231,7 +233,10 @@ export interface NewsCandidate {
   prepared_company_id: string | null;
   prepared_news_date: string | null;
   prepared_tags: string[];
+  prepared_title_gu: string | null;
+  prepared_description_gu: string | null;
   gemini_last_run_at: string | null;
+  gemini_gu_last_run_at: string | null;
   gemini_error: string | null;
   published_news_id: string | null;
   reviewed_by: string | null;

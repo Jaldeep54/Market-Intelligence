@@ -64,6 +64,8 @@ interface RawNewsRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  title_gu: string | null;
+  description_gu: string | null;
   company: { id: string; name: string; slug: string } | null;
   tags: { tag: { id: string; name: string; created_at: string } | null }[] | null;
 }
@@ -81,6 +83,8 @@ function mapRow(row: RawNewsRow): NewsWithRelations {
     created_by: row.created_by,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    title_gu: row.title_gu,
+    description_gu: row.description_gu,
     company: row.company,
     tags: (row.tags ?? [])
       .map((t) => t.tag)

@@ -2,8 +2,13 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCandidateById } from "@/lib/data/candidates";
 import { getCompanies } from "@/lib/data/companies";
-import { prepareCandidateWithGeminiAction, saveOrPublishCandidateAction } from "@/lib/actions/candidates";
+import {
+  prepareCandidateWithGeminiAction,
+  saveOrPublishCandidateAction,
+  translateCandidateToGujaratiAction,
+} from "@/lib/actions/candidates";
 import { PrepareWithGeminiButton } from "@/components/admin/PrepareWithGeminiButton";
+import { TranslateToGujaratiButton } from "@/components/admin/TranslateToGujaratiButton";
 import { CandidateReviewForm } from "@/components/admin/CandidateReviewForm";
 import { CandidateQuickActions } from "@/components/admin/CandidateQuickActions";
 
@@ -27,6 +32,7 @@ export default async function CandidateReviewPage({ params }: { params: Promise<
 
   const article = candidate.article;
   const boundPrepare = prepareCandidateWithGeminiAction.bind(null, id);
+  const boundTranslate = translateCandidateToGujaratiAction.bind(null, id);
   const boundSaveOrPublish = saveOrPublishCandidateAction.bind(null, id);
   const alreadyPublished = candidate.status === "published";
 
@@ -121,22 +127,27 @@ export default async function CandidateReviewPage({ params }: { params: Promise<
               : "Not prepared yet — click below to have Gemini draft it, or fill in the fields yourself."}
           </p>
 
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap gap-3">
             <PrepareWithGeminiButton
               action={boundPrepare}
               label={candidate.prepared_title ? "Regenerate with Gemini" : "Prepare with Gemini"}
             />
+            <TranslateToGujaratiButton
+              action={boundTranslate}
+              label={candidate.prepared_title_gu ? "Re-translate to Gujarati" : "Translate to Gujarati"}
+            />
           </div>
 
           <div className="mt-6">
-            {/* Keyed on gemini_last_run_at so a "Prepare with Gemini" run
-                remounts this form instead of leaving it showing whatever
-                was in its useState/defaultValue at first mount -- the
-                Server Component re-runs after revalidatePath and passes a
-                fresh `candidate`, but a client component's own uncontrolled
-                initial state does not re-sync from new props on its own. */}
+            {/* Keyed on gemini_last_run_at/gemini_gu_last_run_at so a
+                "Prepare with Gemini" or "Translate to Gujarati" run remounts
+                this form instead of leaving it showing whatever was in its
+                useState/defaultValue at first mount -- the Server Component
+                re-runs after revalidatePath and passes a fresh `candidate`,
+                but a client component's own uncontrolled initial state does
+                not re-sync from new props on its own. */}
             <CandidateReviewForm
-              key={candidate.gemini_last_run_at ?? candidate.id}
+              key={`${candidate.gemini_last_run_at ?? ""}-${candidate.gemini_gu_last_run_at ?? ""}-${candidate.id}`}
               action={boundSaveOrPublish}
               companies={companies}
               candidate={candidate}

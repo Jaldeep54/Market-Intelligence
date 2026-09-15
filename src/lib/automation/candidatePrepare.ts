@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { prepareNewsWithGemini } from "@/lib/ai/gemini";
+import { prepareNewsWithGemini, translateNewsToGujarati } from "@/lib/ai/gemini";
 import type { CandidateStatus } from "@/lib/types/database";
 
 // Used by the manual "Prepare with Gemini" / "Generate with Gemini" action
@@ -102,6 +102,49 @@ export async function runGeminiPrepare(
       tags: result.data.tags,
     },
   };
+}
+
+export interface GeminiTranslateOutcome {
+  titleGu: string;
+  descriptionGu: string;
+}
+
+// "Translate to Gujarati" -- runs only when the admin clicks it, next to
+// "Prepare with Gemini" on the News Inbox review page. Translates whatever
+// is currently the candidate's English content (prepared_title/description,
+// falling back to the original article if never prepared/saved), same as
+// what the review form itself displays. Reuses ai_processing_logs and the
+// same GEMINI_API_KEY/model as runGeminiPrepare above -- this is a second
+// call, not a replacement, so a translation failure never touches the
+// English prepared_title/prepared_description or gemini_error.
+export async function runGeminiTranslate(
+  supabase: SupabaseClient,
+  candidateId: string,
+  englishContent: { title: string; description: string },
+  requestedBy: string | null
+): Promise<{ ok: true; data: GeminiTranslateOutcome } | { ok: false; error: string }> {
+  const result = await translateNewsToGujarati(englishContent);
+
+  await supabase.from("ai_processing_logs").insert({
+    candidate_id: candidateId,
+    model: result.model,
+    status: result.ok ? "success" : "error",
+    error_message: result.ok ? null : result.message,
+    requested_by: requestedBy,
+  });
+
+  if (!result.ok) return { ok: false, error: result.message };
+
+  await supabase
+    .from("news_candidates")
+    .update({
+      prepared_title_gu: result.data.titleGu,
+      prepared_description_gu: result.data.descriptionGu,
+      gemini_gu_last_run_at: new Date().toISOString(),
+    })
+    .eq("id", candidateId);
+
+  return { ok: true, data: result.data };
 }
 
 // Called from prepareCandidateWithGeminiAction's own try/catch around
