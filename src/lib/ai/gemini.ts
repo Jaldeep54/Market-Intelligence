@@ -194,13 +194,20 @@ const geminiTranslateOutputSchema = z.object({
   description_gu: z.string().trim().min(1).max(1500),
 });
 
-// Keeping technical/industry terms in English-but-Gujarati-script (rather
-// than fully translated) is the one rule that matters here -- everything
-// else is a normal, natural translation. Unlike buildPrompt() above, there
-// is no word-count target to retry against: a translation just needs to
-// carry the same meaning as its English source, not hit a fixed length.
+// The reader here understands English fine -- the point of a Gujarati
+// version is that reading in one's mother tongue is *easier*, not that it
+// must be pure/heavy Gujarati. So this deliberately does NOT ask for a
+// maximally-Gujarati translation: it asks for the mix an educated,
+// business-literate Gujarati reader actually speaks -- natural Gujarati
+// grammar/connectors/verbs carrying the sentence, with abbreviations, org
+// and brand names, units, numerals, and currency figures left exactly as
+// given in English/Latin script (never transliterated, never converted),
+// and only genuine industry jargon transliterated into Gujarati script.
+// Unlike buildPrompt() above, there is no word-count target to retry
+// against: a translation just needs to carry the same meaning as its
+// English source, not hit a fixed length.
 function buildTranslatePrompt(input: GeminiTranslateInput): string {
-  return `You are translating a solar-industry market intelligence news item from English into Gujarati, for readers who work in the Indian solar/renewable-energy industry.
+  return `You are translating a solar-industry market intelligence news item from English into Gujarati, for a business-literate Gujarati-speaking reader in the Indian solar/renewable-energy industry who already reads English fine -- the Gujarati version exists purely because reading in one's mother tongue is *easier*, not because every word must be forced into pure Gujarati. Aim for exactly how such a reader actually speaks/writes: natural Gujarati carrying the sentence, freely mixed with the English terms they'd use anyway.
 
 English title: "${input.title}"
 
@@ -209,11 +216,18 @@ English description:
 ${input.description}
 """
 
-Translate BOTH the title and the description into natural, fluent Gujarati (ગુજરાતી script).
+Translate BOTH the title and the description following ALL of these rules:
 
-Critical rule for technical and industry-specific terms -- company names, product names, technology names, units, acronyms, and specialized industry vocabulary (e.g. "Solar Module", "Inverter", "Wafer", "Ingot", "Polysilicon", "GW", "MW", "DCR", "ALMM"): do NOT translate these into a native Gujarati word. Instead, transliterate them phonetically into Gujarati script, preserving the English pronunciation. For example, "Solar Module" must become "સોલાર મોડ્યુલ" (a phonetic rendering), never a fully Gujarati-translated equivalent term.
-
-All general, non-technical language -- grammar, connectors, common words, sentence structure -- should be translated into natural, fluent Gujarati.
+1. Abbreviations and short forms: keep exactly as-is in English/Latin script -- never translate or transliterate. Examples: ICRA, GST, RBI, SEBI, NSE, BSE, IPO, CEO, CFO, PLI, DCR, EPC, O&M, R&D, ALMM.
+2. Institution, company, organization, and brand names: keep exactly as given, in English/Latin script -- never translate. This includes full names, e.g. "Reserve Bank of India" stays "Reserve Bank of India", not a Gujarati rendering of it. Examples: ICRA, Goldi Solar, Adani, Tata Power.
+3. Units: keep unit symbols exactly as written, in English/Latin script -- never translate or convert. Examples: MW, GW, kWh, INR, Rs, %, MT, km, sq ft.
+4. Numerals: always standard Arabic numerals (1, 2, 10,000) -- never Gujarati numerals (never ૧, ૨, etc.).
+5. Currency figures: keep the original format, e.g. "Rs 10,000 crore" or "INR 56 lakh crore" -- "crore" and "lakh" may stay as-is (they're already standard in Gujarati/Hindi business usage), but never restructure the number format itself.
+6. Technical/industry/domain-specific terms (e.g. "Solar Module", "Inverter", "Wafer", "Ingot", "Polysilicon", "Green Bond"): transliterate phonetically into Gujarati script rather than translating to a native Gujarati word, whenever a forced pure-Gujarati translation would sound unnatural or unfamiliar to an industry reader. Example: "Solar Module" -> "સોલાર મોડ્યુલ", "Green Bond" -> "ગ્રીન બોન્ડ" -- a phonetic rendering, never a fully Gujarati-translated equivalent.
+7. Proper nouns of any kind -- people's names, place names, product names, ticker symbols -- stay in English/Latin script. Never transliterate or translate them.
+8. Common connecting words, verbs, and general sentence structure: natural, everyday Gujarati. This is what should carry the "easier to read in one's mother tongue" benefit -- don't over-Gujarati-ify at the cost of sounding stiff or archaic; match how a business-literate Gujarati reader in Gujarat actually speaks/writes, which already naturally blends in English nouns.
+9. Dates, percentages, and financial ratios: keep standard English/international formatting -- never translate month names or restructure date formats. Examples: "FY2027", "15 Sept 2026", "5x".
+10. When genuinely unsure whether a term is "technical enough" to transliterate (rule 6) vs. translate: default to leaving it in English rather than forcing an obscure pure-Gujarati word a business reader wouldn't recognize.
 
 Do not add, remove, or summarize information -- translate the full meaning of both fields.
 
