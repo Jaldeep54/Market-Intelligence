@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCandidateById } from "@/lib/data/candidates";
 import { getCompanies } from "@/lib/data/companies";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/automation/candidatePrepare";
 import { readCandidatePrepForm } from "@/lib/validation/candidates";
 import { syncTags } from "@/lib/utils/tags";
+import { sendPublishNotification } from "@/lib/push/send";
 
 export interface CandidateActionState {
   error?: string;
@@ -286,6 +288,18 @@ async function performPublish(candidateId: string, formData: FormData): Promise<
       approved_at: new Date().toISOString(),
     })
     .eq("id", candidateId);
+
+  // Deferred via after() so it runs once this response has been sent,
+  // rather than adding its own latency to the publish action -- see
+  // sendPublishNotification. Never awaited inline: a slow/failed push send
+  // must never fail or delay the publish itself.
+  after(() =>
+    sendPublishNotification({
+      newsId: inserted.id,
+      title: parsed.data.title,
+      titleGu: parsed.data.title_gu || null,
+    }).catch((err) => console.error("[performPublish] push notification send failed:", err))
+  );
 
   return {};
 }
