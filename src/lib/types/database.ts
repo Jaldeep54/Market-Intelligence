@@ -376,6 +376,22 @@ export interface ProductPriceHistory {
   history: WeeklyPriceWithWeek[];
 }
 
+// ---------------------------------------------------------------------------
+// Web Push subscriptions (viewer notifications for newly published news).
+// ---------------------------------------------------------------------------
+export type PushLang = "en" | "gu";
+
+export interface PushSubscriptionRow {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth_key: string;
+  lang: PushLang;
+  created_at: string;
+  updated_at: string;
+}
+
 export const NOT_DISCLOSED = "Not publicly disclosed";
 
 export function displayOrNotDisclosed(value: string | null | undefined): string {

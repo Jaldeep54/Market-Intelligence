@@ -229,7 +229,34 @@ depends on Vercel at all; Vercel only hosts the web app.
    Automation page in the app shows the resulting fetch summaries either
    way.
 
-## 9. Moving off Vercel later
+## 9. Set up Web Push notifications (optional)
+
+Viewers get a browser push notification (headline only, in their chosen
+language) whenever an admin publishes a new article. Free/self-hosted --
+just VAPID key pairs and the `web-push` npm package, no Firebase/FCM or
+paid provider.
+
+1. Migration `20260101000015_push_subscriptions.sql` adds the
+   `push_subscriptions` table -- included in step 2's migration run, nothing
+   extra needed in Supabase for this.
+2. Generate a VAPID key pair once, from the project root:
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+3. In Vercel -> Project Settings -> Environment Variables, add:
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` -- the generated public key. This is
+     baked into the client bundle at **build time**, so redeploy (a fresh
+     build, not just a restart) after setting it.
+   - `VAPID_PRIVATE_KEY` -- the generated private key. Server-only, never
+     prefix with `NEXT_PUBLIC_`.
+4. That's it -- no other setup. The service worker (`public/sw.js`) and
+   manifest changes needed for installability/push are already part of the
+   app. iOS Safari only allows the permission prompt to succeed once the app
+   is added to the home screen (standalone mode); the app deliberately stays
+   silent about this on iOS outside standalone rather than nagging users to
+   install it.
+
+## 10. Moving off Vercel later
 
 This app only uses standard Next.js/Node.js features -- no Vercel-specific
 storage or functions, and the 2-hour schedule already lives in Supabase, not

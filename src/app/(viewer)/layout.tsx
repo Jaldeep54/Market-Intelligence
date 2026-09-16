@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCompanies } from "@/lib/data/companies";
 import { NavBar } from "@/components/viewer/NavBar";
 import { LanguageProvider } from "@/components/viewer/LanguageContext";
+import { PushNotificationManager } from "@/components/viewer/PushNotificationManager";
 
 export default async function ViewerLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -13,6 +14,7 @@ export default async function ViewerLayout({ children }: { children: React.React
         <NavBar companies={companies} />
         <div className="flex flex-1 flex-col">{children}</div>
       </div>
+      <PushNotificationManager />
     </LanguageProvider>
   );
 }

@@ -24,8 +24,13 @@ export function NewsFeed({
       // Fire-and-forget usage counter -- see recordActivityAction. Not
       // awaited: a swipe should never wait on this, and it should never be
       // able to interrupt the paging animation if it's slow or fails.
+      // Also tells PushNotificationManager (mounted in the shared layout,
+      // with no direct reference to this component) that another article
+      // was viewed, so it can offer the notification prompt at a natural
+      // moment instead of on first load.
       onIndexChange={() => {
         void recordActivityAction("news_swipe");
+        window.dispatchEvent(new Event("mi:article-viewed"));
       }}
     />
   );
