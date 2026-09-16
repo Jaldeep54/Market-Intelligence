@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getFeedNews, type DateMode } from "@/lib/data/news";
 import { getCompanyNameBySlug } from "@/lib/data/companies";
 import { NewsFeed } from "@/components/viewer/NewsFeed";
+import { LanguageToggle } from "@/components/viewer/LanguageToggle";
 import type { NewsCategory } from "@/lib/types/database";
 
 function describeFilters(sp: Record<string, string | undefined>): string {
@@ -40,10 +41,11 @@ export default async function FeedPage({
 
   return (
     <main className="flex flex-1 flex-col">
-      <div className="px-4 pt-4 sm:px-8">
+      <div className="flex items-center gap-3 px-4 pt-4 sm:px-8">
         <h1 className="text-sm font-semibold uppercase tracking-wide text-muted">
           {sp.company ? (companyName ?? title) : title}
         </h1>
+        <LanguageToggle />
       </div>
       <NewsFeed items={news} resetKey={JSON.stringify(sp)} />
     </main>
