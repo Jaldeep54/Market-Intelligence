@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { AdvancedFiltersModal } from "@/components/viewer/AdvancedFiltersModal";
+import { LanguageToggle } from "@/components/viewer/LanguageToggle";
 import type { Company, NewsCategory } from "@/lib/types/database";
 
 const CATEGORY_TABS: { label: string; category?: NewsCategory }[] = [
@@ -26,54 +27,63 @@ export function NavBar({ companies }: { companies: Company[] }) {
   return (
     <>
       <nav className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur">
-        <div className="no-scrollbar flex items-center gap-1 overflow-x-auto px-3 py-2.5 sm:px-6">
-          {CATEGORY_TABS.map((tab) => {
-            const isActive =
-              onFeedRoute && !hasCompanyFilter && (activeCategory ?? null) === (tab.category ?? null);
-            return (
-              <Link
-                key={tab.label}
-                href={tab.category ? `/?category=${encodeURIComponent(tab.category)}` : "/"}
-                className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted hover:bg-background hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-              </Link>
-            );
-          })}
+        <div className="flex items-center gap-2 px-3 py-2.5 sm:px-6">
+          {/* Pinned outside the scrollable tab row below, not one of the
+              tabs itself, so it stays visible even when the tabs scroll
+              horizontally on narrow screens. */}
+          <div className="shrink-0">
+            <LanguageToggle />
+          </div>
 
-          <Link
-            href="/companies"
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              pathname.startsWith("/companies")
-                ? "bg-accent text-accent-foreground"
-                : "text-muted hover:bg-background hover:text-foreground"
-            }`}
-          >
-            Top Company Profiles
-          </Link>
+          <div className="no-scrollbar flex flex-1 items-center gap-1 overflow-x-auto">
+            {CATEGORY_TABS.map((tab) => {
+              const isActive =
+                onFeedRoute && !hasCompanyFilter && (activeCategory ?? null) === (tab.category ?? null);
+              return (
+                <Link
+                  key={tab.label}
+                  href={tab.category ? `/?category=${encodeURIComponent(tab.category)}` : "/"}
+                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted hover:bg-background hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
 
-          <Link
-            href="/prices"
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              pathname.startsWith("/prices")
-                ? "bg-accent text-accent-foreground"
-                : "text-muted hover:bg-background hover:text-foreground"
-            }`}
-          >
-            Price Trends
-          </Link>
+            <Link
+              href="/companies"
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                pathname.startsWith("/companies")
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted hover:bg-background hover:text-foreground"
+              }`}
+            >
+              Top Company Profiles
+            </Link>
 
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(true)}
-            className="ml-auto shrink-0 rounded-full border border-border px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
-          >
-            Advanced Filters
-          </button>
+            <Link
+              href="/prices"
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                pathname.startsWith("/prices")
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted hover:bg-background hover:text-foreground"
+              }`}
+            >
+              Price Trends
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              className="ml-auto shrink-0 rounded-full border border-border px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+            >
+              Advanced Filters
+            </button>
+          </div>
         </div>
       </nav>
 
