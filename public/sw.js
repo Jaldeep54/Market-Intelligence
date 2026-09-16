@@ -27,6 +27,13 @@ self.addEventListener("push", (event) => {
     icon: "/icon-192.png",
     badge: "/icon-192.png",
     data: payload.data || {},
+    // Same tag on every article notification so they stack/group under one
+    // "Market Intelligence" entry (Inshorts-style) instead of piling up as
+    // separate alerts -- renotify makes sure a new article still actually
+    // alerts the user despite sharing that tag with the last one.
+    tag: "market-intelligence-news",
+    renotify: true,
+    requireInteraction: false,
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
