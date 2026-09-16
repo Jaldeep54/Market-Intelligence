@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import type { NewsWithRelations } from "@/lib/types/database";
+import { useLanguage } from "@/components/viewer/LanguageContext";
 
 function formatDate(dateStr: string): string {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-IN", {
@@ -19,11 +19,13 @@ const CARD_TINT_CLASSES = ["bg-card-tint-a", "bg-card-tint-b"];
 
 export function NewsCard({ news, index }: { news: NewsWithRelations; index: number }) {
   const tintClass = CARD_TINT_CLASSES[index % CARD_TINT_CLASSES.length];
-  // Both fields must be present -- a title with no description (or vice
-  // versa) means the translation is incomplete/failed, so the toggle is
-  // hidden entirely rather than risk mixing languages on one card.
+  // Language is a global, feed-wide setting (see LanguageToggle) -- this
+  // card only decides, per article, whether it CAN honor it. Both fields
+  // must be present -- a title with no description (or vice versa) means
+  // the translation is incomplete/failed, so this card silently falls back
+  // to English rather than risk mixing languages or showing a blank field.
+  const { lang } = useLanguage();
   const hasGujarati = Boolean(news.title_gu && news.description_gu);
-  const [lang, setLang] = useState<"en" | "gu">("en");
   const showGujarati = hasGujarati && lang === "gu";
 
   return (
@@ -34,28 +36,6 @@ export function NewsCard({ news, index }: { news: NewsWithRelations; index: numb
           <span className="rounded-full bg-border/60 px-2.5 py-1 text-muted">
             {news.company.name}
           </span>
-        )}
-        {hasGujarati && (
-          <div className="ml-auto flex gap-0.5 rounded-full bg-border/60 p-0.5">
-            <button
-              type="button"
-              onClick={() => setLang("en")}
-              className={`rounded-full px-2.5 py-1 transition-colors ${
-                lang === "en" ? "bg-accent text-accent-foreground" : "text-muted"
-              }`}
-            >
-              EN
-            </button>
-            <button
-              type="button"
-              onClick={() => setLang("gu")}
-              className={`rounded-full px-2.5 py-1 transition-colors ${
-                lang === "gu" ? "bg-accent text-accent-foreground" : "text-muted"
-              }`}
-            >
-              ગુજરાતી
-            </button>
-          </div>
         )}
       </div>
 
